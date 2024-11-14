@@ -35,9 +35,9 @@ deprecated:
   removed_in: '3.0.0'
   why: Updated to idempotent modules
   alternative: >
-                 Use M(panos_address_object), M(panos_address_group),
-                 M(panos_service_object), M(panos_service_group), or
-                 M(panos_tag_object) as appropriate.
+                 Use M(paloaltonetworks.panos.panos_address_object), M(paloaltonetworks.panos.panos_address_group),
+                 M(paloaltonetworks.panos.panos_service_object), M(paloaltonetworks.panos.panos_service_group), or
+                 M(paloaltonetworks.panos.panos_tag_object) as appropriate.
 notes:
     - Checkmode is not supported.
     - Panorama is supported.
@@ -203,7 +203,7 @@ options:
 
 EXAMPLES = """
 - name: search for shared address object
-  panos_object:
+  paloaltonetworks.panos.panos_object:
     ip_address: '{{ ip_address }}'
     username: '{{ username }}'
     password: '{{ password }}'
@@ -211,7 +211,7 @@ EXAMPLES = """
     address: 'DevNet'
 
 - name: create an address group in devicegroup using API key
-  panos_object:
+  paloaltonetworks.panos.panos_object:
     ip_address: '{{ ip_address }}'
     api_key: '{{ api_key }}'
     operation: 'add'
@@ -222,7 +222,7 @@ EXAMPLES = """
     devicegroup: 'DMZ Firewalls'
 
 - name: create a global service for TCP 3306
-  panos_object:
+  paloaltonetworks.panos.panos_object:
     ip_address: '{{ ip_address }}'
     api_key: '{{ api_key }}'
     operation: 'add'
@@ -232,7 +232,7 @@ EXAMPLES = """
     description: 'MySQL on tcp/3306'
 
 - name: create a global tag
-  panos_object:
+  paloaltonetworks.panos.panos_object:
     ip_address: '{{ ip_address }}'
     username: '{{ username }}'
     password: '{{ password }}'
@@ -242,7 +242,7 @@ EXAMPLES = """
     description: 'Associated with Project X'
 
 - name: delete an address object from a devicegroup using API key
-  panos_object:
+  paloaltonetworks.panos.panos_object:
     ip_address: '{{ ip_address }}'
     api_key: '{{ api_key }}'
     operation: 'delete'
@@ -256,14 +256,16 @@ RETURN = """
 from ansible.module_utils.basic import AnsibleModule
 
 try:
-    import panos
-    from panos import objects, panorama
+    from panos.panorama import DeviceGroup, Panorama
+    from panos.firewall import Firewall
+    from panos import objects
     from panos.base import PanDevice
     from panos.errors import PanDeviceError
 except ImportError:
     try:
-        import pandevice
-        from pandevice import objects, panorama
+        from pandevice.panorama import DeviceGroup, Panorama
+        from pandevice.firewall import Firewall
+        from pandevice import objects
         from pandevice.base import PanDevice
         from pandevice.errors import PanDeviceError
     except ImportError:
@@ -283,7 +285,7 @@ except ImportError:
 def get_devicegroup(device, devicegroup):
     dg_list = device.refresh_devices()
     for group in dg_list:
-        if isinstance(group, pandevice.panorama.DeviceGroup):
+        if isinstance(group, DeviceGroup):
             if group.name == devicegroup:
                 return group
     return False
@@ -292,10 +294,10 @@ def get_devicegroup(device, devicegroup):
 def find_object(device, dev_group, obj_name, obj_type):
     # Get the firewall objects
     obj_type.refreshall(device)
-    if isinstance(device, pandevice.firewall.Firewall):
+    if isinstance(device, Firewall):
         addr = device.find(obj_name, obj_type)
         return addr
-    elif isinstance(device, pandevice.panorama.Panorama):
+    elif isinstance(device, Panorama):
         addr = device.find(obj_name, obj_type)
         if addr is None:
             if dev_group:
@@ -448,7 +450,7 @@ def main():
         ),
         vsys=dict(default="vsys1"),
         devicegroup=dict(default=None),
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
     )
     module = AnsibleModule(
         argument_spec=argument_spec,

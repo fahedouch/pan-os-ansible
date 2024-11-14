@@ -58,13 +58,13 @@ EXAMPLES = """
 # Tries for 10 times to set the admin password of 192.168.1.1 to "badpassword"
 # via SSH, authenticating using key /tmp/ssh.key
 - name: set admin password
-  panos_admpwd:
+  paloaltonetworks.panos.panos_admpwd:
     ip_address: "192.168.1.1"
     username: "admin"
     key_filename: "/tmp/ssh.key"
     newpassword: "badpassword"
   register: result
-  until: not result|failed
+  until: result is not failed
   retries: 10
   delay: 30
 """
@@ -166,7 +166,7 @@ def set_panwfw_password(module, ip_address, key_filename, newpassword, username)
     buff = wait_with_timeout(module, shell, "#", 120)
     stdout += buff
 
-    if "success" not in buff:
+    if "successfully" not in buff:
         module.fail_json(msg="Error setting " + username + " password: " + stdout)
 
     # exit

@@ -29,9 +29,9 @@ description:
 author: "Luigi Mori (@jtschichold), Ivan Bojer (@ivanbojer)"
 version_added: '1.0.0'
 deprecated:
-    alternative: Use M(panos_administrator) instead.
-    removed_in: '3.0.0'
-    why: This module is a subset of M(panos_administrator)'s functionality.
+    alternative: Use M(paloaltonetworks.panos.panos_administrator) instead.
+    why: This module is a subset of M(paloaltonetworks.panos.panos_administrator)'s functionality.
+    removed_in: "3.0.0"
 requirements:
     - pan-python can be obtained from PyPI U(https://pypi.python.org/pypi/pan-python)
 notes:
@@ -49,7 +49,7 @@ options:
             - Port used to connect to the PAN-OS device being configured.
         required: false
         type: str
-        default: 443
+        default: '443'
     username:
         description:
             - Username credentials to use for auth unless I(api_key) is set.
@@ -84,12 +84,12 @@ options:
 
 EXAMPLES = """
 # Set the password of user admin to "badpassword"
-  - name: set admin password
-    panos_admin:
-      ip_address: "192.168.1.1"
-      password: "admin"
-      admin_username: admin
-      admin_password: "badpassword"
+- name: set admin password
+  paloaltonetworks.panos.panos_admin:
+    ip_address: "192.168.1.1"
+    password: "admin"
+    admin_username: admin
+    admin_password: "badpassword"
 """
 
 RETURN = """
@@ -183,7 +183,7 @@ def main():
         admin_username=dict(default="admin"),
         admin_password=dict(no_log=True, required=True),
         role=dict(),
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
     )
     module = AnsibleModule(
         argument_spec=argument_spec,

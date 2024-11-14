@@ -44,7 +44,7 @@ options:
 EXAMPLES = """
 # Gather facts
 - name: Get facts
-  panos_facts:
+  paloaltonetworks.panos.panos_facts:
     provider: '{{ provider }}'
     gather_subset: ['config']
 """
@@ -233,7 +233,6 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
 
 try:
     from panos.device import Vsys
-    from panos.errors import PanDeviceError
     from panos.firewall import Firewall
     from panos.network import (
         AggregateInterface,
@@ -251,7 +250,6 @@ try:
 except ImportError:
     try:
         from pandevice.device import Vsys
-        from pandevice.errors import PanDeviceError
         from pandevice.firewall import Firewall
         from pandevice.network import (
             AggregateInterface,
@@ -485,7 +483,7 @@ class VsysFacts(Factbase):
                 }
             )
 
-        self.facts.update({"virtual-systems": virtual_systems})
+        self.facts.update({"virtual_systems": virtual_systems})
 
 
 class Config(Factbase):
@@ -524,7 +522,7 @@ def main():
 
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
-        supports_check_mode=False,
+        supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 

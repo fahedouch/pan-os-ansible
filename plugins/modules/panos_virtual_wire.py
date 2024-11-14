@@ -22,7 +22,7 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_virtual_wire
-short_description: Configures Virtual Wires (vwire).
+short_description: Manage Virtual Wires (vwire).
 description:
     - Manage PAN-OS Virtual Wires (vwire).
 author: "Patrick Avery (@unknown)"
@@ -32,7 +32,8 @@ requirements:
     - pandevice
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.vsys_import
     - paloaltonetworks.panos.fragments.full_template_support
 notes:
@@ -43,17 +44,14 @@ options:
         description:
             -  Name of the Virtual Wire
         type: str
-        required: True
     interface1:
         description:
             - First interface of Virtual Wire
         type: str
-        required: True
     interface2:
         description:
             - Second interface of Virtual Wire
         type: str
-        required: True
     tag:
         description:
             - Set tag that is allowed over Virtual Wire.  Currently
@@ -71,7 +69,7 @@ options:
 
 EXAMPLES = """
 - name: Create Vwire
-  panos_virtual_wire:
+  paloaltonetworks.panos.panos_virtual_wire:
     provider: '{{ provider }}'
     name: 'vwire1'
     interface1: 'ethernet1/1'
@@ -90,31 +88,24 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.network import VirtualWire
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.network import VirtualWire
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys_importable=True,
         template=True,
         template_stack=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
-        argument_spec=dict(
+        with_set_vsys_reference=True,
+        sdk_cls=("network", "VirtualWire"),
+        sdk_params=dict(
             name=dict(
                 type="str",
                 required=True,
             ),
-            interface1=dict(type="str", required=True),
-            interface2=dict(type="str", required=True),
+            interface1=dict(),
+            interface2=dict(),
             tag=dict(type="int"),
             multicast=dict(type="bool"),
             pass_through=dict(type="bool"),
@@ -127,69 +118,7 @@ def main():
         required_one_of=helper.required_one_of,
     )
 
-    parent = helper.get_pandevice_parent(module)
-
-    spec = {
-        "name": module.params["name"],
-        "interface1": module.params["interface1"],
-        "interface2": module.params["interface2"],
-        "tag": module.params["tag"],
-        "multicast": module.params["multicast"],
-        "pass_through": module.params["pass_through"],
-    }
-    obj = VirtualWire(**spec)
-
-    try:
-        listing = VirtualWire.refreshall(parent, matching_vsys=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    reference_params = {
-        "refresh": True,
-        "update": not module.check_mode,
-        "return_type": "bool",
-    }
-    parent.add(obj)
-
-    changed = False
-    if module.params["state"] == "present":
-        for vwire in listing:
-            if vwire.name != obj.name:
-                continue
-            if not vwire.equal(obj, compare_children=False):
-                changed = True
-                obj.extend(vwire.children)
-                if not module.check_mode:
-                    try:
-                        obj.apply()
-                    except PanDeviceError as e:
-                        module.fail_json(msg="Failed apply: {0}".format(e))
-            break
-        else:
-            changed = True
-            if not module.check_mode:
-                try:
-                    obj.create()
-                except PanDeviceError as e:
-                    module.fail_json(msg="Failed create: {0}".format(e))
-        try:
-            changed |= obj.set_vsys(module.params["vsys"], **reference_params)
-        except PanDeviceError as e:
-            module.fail_json(msg="Failed setref: {0}".format(e))
-    elif module.params["state"] == "absent":
-        try:
-            changed |= obj.set_vsys(None, **reference_params)
-        except PanDeviceError as e:
-            module.fail_json(msg="Failed setref: {0}".format(e))
-        if obj.name in [x.name for x in listing]:
-            changed = True
-            if not module.check_mode:
-                try:
-                    obj.delete()
-                except PanDeviceError as e:
-                    module.fail_json(msg="Failed delete: {0}".format(e))
-
-    module.exit_json(changed=changed, msg="done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

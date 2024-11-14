@@ -27,6 +27,10 @@ description:
     - Retrieves information on virtual routers from a firewall or Panorama.
 author: "Garfield Lee Freeman (@shinmog)"
 version_added: '1.0.0'
+deprecated:
+    alternative: Use M(paloaltonetworks.panos.panos_virtual_router) with I(state=gathered)
+    removed_in: '3.0.0'
+    why: Updating module design to network resource modules.
 requirements:
     - pan-python
     - pandevice
@@ -46,14 +50,14 @@ options:
 EXAMPLES = """
 # Get information on a specific virtual router
 - name: Get vr3 info
-  panos_virtual_router_facts:
+  paloaltonetworks.panos.panos_virtual_router_facts:
     provider: '{{ provider }}'
     name: 'vr3'
   register: ans
 
 # Get the config of all virtual routers
 - name: Get all virtual routers
-  panos_virtual_router_facts:
+  paloaltonetworks.panos.panos_virtual_router_facts:
     provider: '{{ provider }}'
   register: vrlist
 """
@@ -130,8 +134,14 @@ def main():
     )
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
-        supports_check_mode=False,
+        supports_check_mode=True,
         required_one_of=helper.required_one_of,
+    )
+
+    module.deprecate(
+        "Deprecated; use panos_virtual_router with state=gathered",
+        version="3.0.0",
+        collection_name="paloaltonetworks.panos",
     )
 
     # Verify imports, build pandevice object tree.
@@ -144,8 +154,7 @@ def main():
         except PanDeviceError as e:
             module.fail_json(msg="Failed refreshall: {0}".format(e))
 
-        vrlist = helper.to_module_dict(listing)
-        module.exit_json(changed=False, vrlist=vrlist)
+        module.exit_json(changed=False, vrlist=helper.describe(listing))
 
     vr = VirtualRouter(name)
     parent.add(vr)
@@ -154,8 +163,7 @@ def main():
     except PanDeviceError as e:
         module.fail_json(msg="Failed refresh: {0}".format(e))
 
-    spec = helper.to_module_dict(vr)
-    module.exit_json(changed=False, spec=spec)
+    module.exit_json(changed=False, spec=helper.describe(vr))
 
 
 if __name__ == "__main__":

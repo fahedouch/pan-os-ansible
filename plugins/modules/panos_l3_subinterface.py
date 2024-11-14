@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_l3_subinterface
-short_description: configure layer3 subinterface
+short_description: Manage layer3 subinterface
 description:
-    - Configure a layer3 subinterface.
+    - Manage a layer3 subinterface.
 author: "Garfield Lee Freeman (@shinmog)"
 version_added: '1.0.0'
 requirements:
@@ -35,9 +35,12 @@ notes:
     - Checkmode is supported.
     - If the PAN-OS device is a firewall and I(vsys) is not specified, then
       the vsys will default to I(vsys=vsys1).
+    - If the PAN-OS device is a Panorama, I(vsys) should be specified,
+      otherwise the default is I(null), and I(zone-name) assignment will fail.
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.vsys_import
     - paloaltonetworks.panos.fragments.template_only
 options:
@@ -45,12 +48,14 @@ options:
         description:
             - Name of the interface to configure.
         type: str
-        required: true
+    parent_interface:
+        description:
+            - Name of the parent interface
+        type: str
     tag:
         description:
             - Tag (vlan id) for the interface
         type: int
-        required: true
     ip:
         description:
             - List of static IP addresses.
@@ -117,16 +122,16 @@ options:
 EXAMPLES = """
 # Create ethernet1/1.5 as DHCP.
 - name: enable DHCP client on ethernet1/1.5 in zone public
-  panos_l3_subinterface:
+  paloaltonetworks.panos.panos_l3_subinterface:
     provider: '{{ provider }}'
     name: "ethernet1/1.5"
     tag: 1
-    create_default_route: True
+    create_default_route: true
     zone_name: "public"
 
 # Update ethernet1/2.7 with a static IP address in zone dmz.
 - name: ethernet1/2.7 as static in zone dmz
-  panos_l3_subinterface:
+  paloaltonetworks.panos.panos_l3_subinterface:
     provider: '{{ provider }}'
     name: "ethernet1/2.7"
     tag: 7
@@ -141,32 +146,86 @@ RETURN = """
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos import (
+    ConnectionHelper,
     get_connection,
+    to_sdk_cls,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.network import AggregateInterface, EthernetInterface, Layer3Subinterface
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.network import (
-            AggregateInterface,
-            EthernetInterface,
-            Layer3Subinterface,
-        )
-    except ImportError:
-        pass
+
+class Helper(ConnectionHelper):
+    def initial_handling(self, module):
+        # Sanity check.
+        name_set = True if module.params["name"] is not None else False
+        parent_set = True if module.params["parent_interface"] is not None else False
+
+        if module.params["state"] == "gathered" and not parent_set:
+            module.fail_json(
+                msg="'parent_interface' is required when state is 'gathered'."
+            )
+
+        if name_set:
+            if "." not in module.params["name"]:
+                module.fail_json(
+                    msg="Subinterface name does not have '.' in it: {0}".format(
+                        module.params["name"]
+                    )
+                )
+            if (
+                parent_set
+                and module.params["parent_interface"] not in module.params["name"]
+            ):
+                module.fail_json(
+                    msg="Parent and subinterface names do not match: {0} - {1}".format(
+                        module.params["parent_interface"], module.params["name"]
+                    )
+                )
+
+        if module.params["state"] not in ("present", "replaced"):
+            return
+
+        if module.params["vsys"] is None:
+            module.params["vsys"] = "vsys1"
+
+    def parent_handling(self, parent, module):
+        if module.params["parent_interface"] is not None:
+            iname = module.params["parent_interface"]
+        else:
+            iname = module.params["name"].split(".")[0]
+
+        if iname.startswith("ae"):
+            eth = to_sdk_cls("network", "AggregateInterface")(iname)
+        else:
+            eth = to_sdk_cls("network", "EthernetInterface")(iname)
+
+        eth.mode = "layer3"
+        parent.add(eth)
+        return eth
+
+    def spec_handling(self, spec, module):
+        if module.params["state"] not in ("present", "replaced"):
+            return
+
+        spec["enable_dhcp"] = True if module.params["enable_dhcp"] else None
+
+        if not spec["create_dhcp_default_route"] and spec["enable_dhcp"] is None:
+            spec["create_dhcp_default_route"] = None
 
 
 def main():
     helper = get_connection(
+        helper_cls=Helper,
         vsys_importable=True,
         template=True,
         with_classic_provider_spec=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         min_pandevice_version=(0, 8, 0),
-        argument_spec=dict(
+        with_set_vsys_reference=True,
+        with_set_zone_reference=True,
+        with_set_virtual_router_reference=True,
+        default_zone_mode="layer3",
+        sdk_cls=("network", "Layer3Subinterface"),
+        sdk_params=dict(
             name=dict(required=True),
             tag=dict(required=True, type="int"),
             ip=dict(type="list", elements="str"),
@@ -179,138 +238,23 @@ def main():
             ipv4_mss_adjust=dict(type="int"),
             ipv6_mss_adjust=dict(type="int"),
             enable_dhcp=dict(type="bool", default=True),
-            create_default_route=dict(type="bool", default=False),
+            create_default_route=dict(
+                type="bool", default=False, sdk_param="create_dhcp_default_route"
+            ),
             dhcp_default_route_metric=dict(type="int"),
-            zone_name=dict(),
-            vr_name=dict(default="default"),
+        ),
+        extra_params=dict(
+            parent_interface=dict(type="str"),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # Verify libs are present, get the parent object.
-    parent = helper.get_pandevice_parent(module)
-
-    # Get the object params.
-    spec = {
-        "name": module.params["name"],
-        "tag": module.params["tag"],
-        "ip": module.params["ip"],
-        "ipv6_enabled": module.params["ipv6_enabled"],
-        "management_profile": module.params["management_profile"],
-        "mtu": module.params["mtu"],
-        "adjust_tcp_mss": module.params["adjust_tcp_mss"],
-        "netflow_profile": module.params["netflow_profile"],
-        "comment": module.params["comment"],
-        "ipv4_mss_adjust": module.params["ipv4_mss_adjust"],
-        "ipv6_mss_adjust": module.params["ipv6_mss_adjust"],
-        "enable_dhcp": True if module.params["enable_dhcp"] else None,
-        # 'create_dhcp_default_route': set below
-        "dhcp_default_route_metric": module.params["dhcp_default_route_metric"],
-    }
-
-    if module.params["create_default_route"]:
-        spec["create_dhcp_default_route"] = True
-    elif spec["enable_dhcp"]:
-        spec["create_dhcp_default_route"] = False
-    else:
-        spec["create_dhcp_default_route"] = None
-
-    # Get other info.
-    state = module.params["state"]
-    zone_name = module.params["zone_name"]
-    vr_name = module.params["vr_name"]
-    vsys = module.params["vsys"]
-
-    # Sanity check.
-    if "." not in spec["name"]:
-        module.fail_json(msg='Interface name does not have "." in it')
-
-    # check on EthernetInterface or AggregateInterface
-    parent_iname = spec["name"].split(".")[0]
-
-    # Retrieve the current config.
-    if parent_iname.startswith("ae"):
-        parent_eth = AggregateInterface(parent_iname)
-    else:
-        parent_eth = EthernetInterface(parent_iname)
-
-    parent.add(parent_eth)
-    try:
-        parent_eth.refresh()
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    if parent_eth.mode != "layer3":
-        module.fail_json(
-            msg="{0} mode is {1}, not layer3".format(parent_eth.name, parent_eth.mode)
-        )
-
-    interfaces = parent_eth.findall(Layer3Subinterface)
-
-    # Build the object based on the user spec.
-    eth = Layer3Subinterface(**spec)
-    parent_eth.add(eth)
-
-    # Which action should we take on the interface?
-    changed = False
-    reference_params = {
-        "refresh": True,
-        "update": not module.check_mode,
-        "return_type": "bool",
-    }
-    if state == "present":
-        for item in interfaces:
-            if item.name != eth.name:
-                continue
-            # Interfaces have children, so don't compare them.
-            if not item.equal(eth, compare_children=False):
-                changed = True
-                eth.extend(item.children)
-                if not module.check_mode:
-                    try:
-                        eth.apply()
-                    except PanDeviceError as e:
-                        module.fail_json(msg="Failed apply: {0}".format(e))
-            break
-        else:
-            changed = True
-            if not module.check_mode:
-                try:
-                    eth.create()
-                except PanDeviceError as e:
-                    module.fail_json(msg="Failed create: {0}".format(e))
-
-        # Set references.
-        try:
-            changed |= eth.set_vsys(vsys, **reference_params)
-            changed |= eth.set_zone(zone_name, mode=parent_eth.mode, **reference_params)
-            changed |= eth.set_virtual_router(vr_name, **reference_params)
-        except PanDeviceError as e:
-            module.fail_json(msg="Failed setref: {0}".format(e))
-    elif state == "absent":
-        # Remove references.
-        try:
-            changed |= eth.set_virtual_router(None, **reference_params)
-            changed |= eth.set_zone(None, mode=parent_eth.mode, **reference_params)
-            changed |= eth.set_vsys(None, **reference_params)
-        except PanDeviceError as e:
-            module.fail_json(msg="Failed setref: {0}".format(e))
-
-        # Remove the interface.
-        if eth.name in [x.name for x in interfaces]:
-            changed = True
-            if not module.check_mode:
-                try:
-                    eth.delete()
-                except PanDeviceError as e:
-                    module.fail_json(msg="Failed delete: {0}".format(e))
-
-    # Done!
-    module.exit_json(changed=changed, msg="Done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

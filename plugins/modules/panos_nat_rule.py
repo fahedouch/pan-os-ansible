@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_nat_rule
-short_description: create a policy NAT rule
+short_description: Manage a policy NAT rule
 description:
-    - Create a policy nat rule. Keep in mind that we can either end up configuring source NAT, destination NAT, or both.
+    - Manage a policy nat rule. Keep in mind that we can either end up configuring source NAT, destination NAT, or both.
     - Instead of splitting it into two we will make a fair attempt to determine which one the user wants.
 author:
     - Luigi Mori (@jtschichold)
@@ -34,23 +34,30 @@ author:
     - Garfield Lee Freeman (@shinmog)
     - Ken Celenza (@itdependsnetworks)
 version_added: '1.0.0'
+deprecated:
+    alternative: Use M(paloaltonetworks.panos.panos_nat_rule2) instead.
+    removed_in: '3.0.0'
+    why: The design of this module is not consistent with current design.
 requirements:
-    - pan-python can be obtained from PyPI U(https://pypi.python.org/pypi/pan-python)
-    - pandevice can be obtained from PyPI U(https://pypi.python.org/pypi/pandevice)
+    - pan-python >= 0.16
+    - pan-os-python >= 1.7.3
 notes:
     - Checkmode is supported.
     - Panorama is supported.
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
-    - paloaltonetworks.panos.fragments.state
     - paloaltonetworks.panos.fragments.device_group
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.rulebase
     - paloaltonetworks.panos.fragments.deprecated_commit
+    - paloaltonetworks.panos.fragments.uuid
+    - paloaltonetworks.panos.fragments.target
+    - paloaltonetworks.panos.fragments.movement
+    - paloaltonetworks.panos.fragments.audit_comment
 options:
     state:
         description:
-            - The state of the NAT rule.
+            - The state of this object.
         type: str
         choices:
             - present
@@ -182,31 +189,6 @@ options:
             - Static dnat translated port
             - Mutually exclusive with I(dnat_dynamic_address), I(dnat_dynamic_port), and I(dnat_dynamic_distribution).
         type: str
-    location:
-        description:
-            - Position to place the created rule in the rule base.
-        type: str
-        choices:
-            - top
-            - bottom
-            - before
-            - after
-    existing_rule:
-        description:
-            - If I(location=before) or I(location=after), this option specifies an existing
-              rule name.  The new rule will be created in the specified position relative to this
-              rule.
-            - If I(location=before) or I(location=after), I(existing_rule) is required.
-        type: str
-    target:
-        description:
-            - Apply this rule exclusively to the listed firewalls in Panorama.
-        type: list
-        elements: str
-    negate_target:
-        description:
-            - Exclude this rule from the listed firewalls in Panorama.
-        type: bool
     group_tag:
         description:
             - The group tag.
@@ -226,16 +208,12 @@ options:
             - Dynamic destination translated distribution.
             - Mutually exclusive with I(dnat_address) and I(dnat_port).
         type: str
-    audit_comment:
-        description:
-            - Add an audit comment to the rule being defined.
-        type: str
 """
 
 EXAMPLES = """
 # Create a source and destination nat rule
 - name: Create NAT SSH rule for 10.0.1.101
-  panos_nat_rule:
+  paloaltonetworks.panos.panos_nat_rule:
     provider: '{{ provider }}'
     rule_name: "Web SSH"
     source_zone: ["external"]
@@ -249,7 +227,7 @@ EXAMPLES = """
     dnat_port: "22"
 
 - name: disable a specific security rule
-  panos_nat_rule:
+  paloaltonetworks.panos.panos_nat_rule:
     provider: '{{ provider }}'
     rule_name: 'Prod-Legacy 1'
     state: 'disable'
@@ -279,6 +257,7 @@ except ImportError:
 def create_nat_rule(**kwargs):
     nat_rule = NatRule(
         name=kwargs["rule_name"],
+        uuid=kwargs["uuid"],
         description=kwargs["description"],
         fromzone=kwargs["source_zone"],
         source=kwargs["source_ip"],
@@ -363,6 +342,11 @@ def main():
         rulebase=True,
         error_on_firewall_shared=True,
         min_pandevice_version=(1, 5, 0),
+        with_uuid=True,
+        with_commit=True,
+        with_target=True,
+        with_movement=True,
+        with_audit_comment=True,
         argument_spec=dict(
             rule_name=dict(required=True),
             description=dict(),
@@ -390,14 +374,10 @@ def main():
             dnat_dynamic_distribution=dict(),
             tag=dict(type="list", elements="str"),
             state=dict(
-                default="present", choices=["present", "absent", "enable", "disable"]
+                type="str",
+                default="present",
+                choices=["present", "absent", "enable", "disable"],
             ),
-            location=dict(choices=["top", "bottom", "before", "after"]),
-            existing_rule=dict(),
-            target=dict(type="list", elements="str"),
-            negate_target=dict(type="bool"),
-            commit=dict(type="bool", default=False),
-            audit_comment=dict(),
             # TODO(gfreeman) - remove later.
             tag_name=dict(),
             devicegroup=dict(),
@@ -410,6 +390,12 @@ def main():
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
+    )
+
+    module.deprecate(
+        "This module has been deprecated; use panos_nat_rule2 instead",
+        version="3.0.0",
+        collection_name="paloaltonetworks.panos",
     )
 
     # TODO(gfreeman) - remove later.
@@ -472,15 +458,10 @@ def main():
             msg="'existing_rule' must be specified if location is 'before' or 'after'."
         )
 
-    # Get the current NAT rules.
-    try:
-        rules = NatRule.refreshall(parent)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed NAT refreshall: {0}".format(e))
-
     # Create the desired rule.
     new_rule = create_nat_rule(
         rule_name=rule_name,
+        uuid=module.params["uuid"],
         description=description,
         tag_val=tag_val,
         source_zone=source_zone,
@@ -511,22 +492,28 @@ def main():
         module.fail_json(msg="Incorrect NAT rule params specified; quitting")
 
     # Perform the desired operation.
-    changed = False
-    diff = None
+    resp = {}
     if state in ("enable", "disable"):
+        # Get the current NAT rules.
+        try:
+            rules = NatRule.refreshall(parent)
+        except PanDeviceError as e:
+            module.fail_json(msg="Failed NAT refreshall: {0}".format(e))
+
+        resp = {"changed": False, "diff": None}
         for rule in rules:
             if rule.name == new_rule.name:
                 break
         else:
             module.fail_json(msg='Rule "{0}" not present'.format(new_rule.name))
         if state == "enable" and rule.disabled:
-            changed = True
+            resp["changed"] = True
         elif state == "disable" and not rule.disabled:
-            changed = True
-        if changed:
-            diff = dict(before=eltostr(rule))
+            resp["changed"] = True
+        if resp["changed"]:
+            resp["diff"] = dict(before=eltostr(rule))
             rule.disabled = not rule.disabled
-            diff["after"] = eltostr(rule)
+            resp["diff"]["after"] = eltostr(rule)
             if not module.check_mode:
                 try:
                     rule.update("disabled")
@@ -534,18 +521,21 @@ def main():
                     module.fail_json(msg="Failed enable: {0}".format(e))
     else:
         parent.add(new_rule)
-        changed, diff = helper.apply_state(new_rule, rules, module)
+        resp = helper.apply_state(new_rule, module=module)
         if state == "present":
-            changed |= helper.apply_position(new_rule, location, existing_rule, module)
+            resp["changed"] |= helper.apply_position(
+                new_rule, location, existing_rule, module
+            )
 
     # Audit comment.
-    if changed and module.params["audit_comment"] and not module.check_mode:
+    if resp["changed"] and module.params["audit_comment"] and not module.check_mode:
         new_rule.opstate.audit_comment.update(module.params["audit_comment"])
 
-    if changed and module.params["commit"]:
+    if resp["changed"] and module.params["commit"]:
         helper.commit(module)
 
-    module.exit_json(changed=changed, diff=diff, msg="Done")
+    resp["msg"] = "Done"
+    module.exit_json(**resp)
 
 
 if __name__ == "__main__":

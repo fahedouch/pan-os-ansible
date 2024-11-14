@@ -22,7 +22,7 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_bgp_policy_rule
-short_description: Configures a BGP Policy Import/Export Rule
+short_description: Manage a BGP Policy Import/Export Rule
 description:
     - Use BGP to publish and consume routes from disparate networks.
 author:
@@ -166,6 +166,10 @@ options:
             - remove-regex
             - append
             - overwrite
+    action_community_modifier:
+        description:
+            - Modifier for the community action. Required if 'action_community_type' is set to 'append' or 'overwrite'.
+        type: str
     action_community_argument:
         description:
             - Argument to the action community value if needed.
@@ -193,45 +197,45 @@ options:
         elements: dict
     vr_name:
         description:
-            - Name of the virtual router; it must already exist; see M(panos_virtual_router).
+            - Name of the virtual router; it must already exist; see M(paloaltonetworks.panos.panos_virtual_router).
         type: str
         default: default
 """
 
 EXAMPLES = """
 # Add a BGP Policy
-  - name: Create Policy Import Rule
-    panos_bgp_policy_rule:
-      provider: '{{ provider }}'
-      vr_name: 'default'
-      name: 'import-rule-001'
-      type: 'import'
-      enable: true
-      action: 'allow'
-      address_prefix:
-        - name: '10.1.1.0/24'
-        - name: '10.1.2.0/24'
-          exact: false
-        - name: '10.1.3.0/24'
-          exact: true
-      action_dampening: 'dampening-profile'
+- name: Create Policy Import Rule
+  paloaltonetworks.panos.panos_bgp_policy_rule:
+    provider: '{{ provider }}'
+    vr_name: 'default'
+    name: 'import-rule-001'
+    type: 'import'
+    enable: true
+    action: 'allow'
+    address_prefix:
+      - name: '10.1.1.0/24'
+      - name: '10.1.2.0/24'
+        exact: false
+      - name: '10.1.3.0/24'
+        exact: true
+    action_dampening: 'dampening-profile'
 
-  - name: Create Policy Export Rule
-    panos_bgp_policy_rule:
-      provider: '{{ provider }}'
-      vr_name: 'default'
-      name: 'export-rule-001'
-      type: 'export'
-      enable: true
-      action: 'allow'
+- name: Create Policy Export Rule
+  paloaltonetworks.panos.panos_bgp_policy_rule:
+    provider: '{{ provider }}'
+    vr_name: 'default'
+    name: 'export-rule-001'
+    type: 'export'
+    enable: true
+    action: 'allow'
 
-  - name: Remove Export Rule
-    panos_bgp_policy_rule:
-      provider: '{{ provider }}'
-      state: 'absent'
-      vr_name: 'default'
-      name: 'export-rule-001'
-      type: 'export'
+- name: Remove Export Rule
+  paloaltonetworks.panos.panos_bgp_policy_rule:
+    provider: '{{ provider }}'
+    state: 'absent'
+    vr_name: 'default'
+    name: 'export-rule-001'
+    type: 'export'
 """
 
 RETURN = """
@@ -269,7 +273,7 @@ except ImportError:
 
 def setup_args():
     return dict(
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
         vr_name=dict(default="default"),
         type=dict(type="str", required=True, choices=["import", "export"]),
         name=dict(type="str", required=True),
@@ -298,6 +302,7 @@ def setup_args():
             type="str",
             choices=["none", "remove-all", "remove-regex", "append", "overwrite"],
         ),
+        action_community_modifier=dict(type="str"),
         action_community_argument=dict(type="str"),
         action_extended_community_type=dict(type="str"),
         action_extended_community_argument=dict(type="str"),
@@ -359,6 +364,7 @@ def main():
         "action_as_path_type": module.params["action_as_path_type"],
         "action_as_path_prepend_times": module.params["action_as_path_prepend_times"],
         "action_community_type": module.params["action_community_type"],
+        "action_community_modifier": module.params["action_community_modifier"],
         "action_community_argument": module.params["action_community_argument"],
         "action_extended_community_type": module.params[
             "action_extended_community_type"
@@ -375,28 +381,33 @@ def main():
     else:
         obj = BgpPolicyExportRule(**spec)
 
-    # Handle address prefixes.
-    for x in module.params["address_prefix"]:
-        if "name" not in x:
-            module.fail_json(msg='Address prefix dict requires "name": {0}'.format(x))
-        obj.add(
-            BgpPolicyAddressPrefix(
-                to_text(x["name"], encoding="utf-8", errors="surrogate_or_strict"),
-                None if x.get("exact") is None else module.boolean(x["exact"]),
+    # Since address_prefix can legitimately be empty, only process it if non-empty
+    if module.params["address_prefix"] is not None:
+        # Handle address prefixes.
+        for x in module.params["address_prefix"]:
+            if "name" not in x:
+                module.fail_json(
+                    msg='Address prefix dict requires "name": {0}'.format(x)
+                )
+            obj.add(
+                BgpPolicyAddressPrefix(
+                    to_text(x["name"], encoding="utf-8", errors="surrogate_or_strict"),
+                    None if x.get("exact") is None else module.boolean(x["exact"]),
+                )
             )
-        )
 
     listing = bgp.findall(obj.__class__)
     bgp.add(obj)
 
     # Apply the state.
-    changed, diff = helper.apply_state(obj, listing, module)
+    resp = helper.apply_state(obj, listing, module)
 
     # Optional commit.
-    if changed and module.params["commit"]:
+    if resp["changed"] and module.params["commit"]:
         helper.commit(module)
 
-    module.exit_json(changed=changed, diff=diff, msg="done")
+    resp["msg"] = "done"
+    module.exit_json(**resp)
 
 
 if __name__ == "__main__":

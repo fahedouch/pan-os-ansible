@@ -38,38 +38,40 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys_shared
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     http_profile:
         description:
             - Name of the http server profile.
         type: str
-        required: True
+        required: true
     log_type:
         description:
             - The log type for this header.
         type: str
         choices:
+            - auth
             - config
+            - data
+            - decryption
+            - globalprotect
+            - gtp
+            - hip match
+            - iptag
+            - sctp
             - system
             - threat
             - traffic
-            - hip match
-            - url
-            - data
-            - wildfire
             - tunnel
+            - url
             - user id
-            - gtp
-            - auth
-            - sctp
-            - iptag
+            - wildfire
         required: True
     header:
         description:
             - The header name.
         type: str
-        required: True
     value:
         description:
             - The value to assign the header.
@@ -78,7 +80,7 @@ options:
 
 EXAMPLES = """
 - name: Add a header to the config log type
-  panos_http_profile_header:
+  paloaltonetworks.panos.panos_http_profile_header:
     provider: '{{ provider }}'
     http_profile: 'my-profile'
     log_type: 'user id'
@@ -92,63 +94,51 @@ RETURN = """
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos import (
+    ConnectionHelper,
     get_connection,
 )
 
-try:
-    from panos.device import (
-        HttpAuthHeader,
-        HttpConfigHeader,
-        HttpDataHeader,
-        HttpGtpHeader,
-        HttpHipMatchHeader,
-        HttpIpTagHeader,
-        HttpSctpHeader,
-        HttpServerProfile,
-        HttpSystemHeader,
-        HttpThreatHeader,
-        HttpTrafficHeader,
-        HttpTunnelHeader,
-        HttpUrlHeader,
-        HttpUserIdHeader,
-        HttpWildfireHeader,
-    )
-    from panos.errors import PanDeviceError
-except ImportError:
-    try:
-        from pandevice.device import (
-            HttpAuthHeader,
-            HttpConfigHeader,
-            HttpDataHeader,
-            HttpGtpHeader,
-            HttpHipMatchHeader,
-            HttpIpTagHeader,
-            HttpSctpHeader,
-            HttpServerProfile,
-            HttpSystemHeader,
-            HttpThreatHeader,
-            HttpTrafficHeader,
-            HttpTunnelHeader,
-            HttpUrlHeader,
-            HttpUserIdHeader,
-            HttpWildfireHeader,
-        )
-        from pandevice.errors import PanDeviceError
-    except ImportError:
-        pass
+
+class Helper(ConnectionHelper):
+    def spec_handling(self, spec, module):
+        cls_map = {
+            "config": "HttpConfigHeader",
+            "system": "HttpSystemHeader",
+            "threat": "HttpThreatHeader",
+            "traffic": "HttpTrafficHeader",
+            "hip match": "HttpHipMatchHeader",
+            "url": "HttpUrlHeader",
+            "data": "HttpDataHeader",
+            "wildfire": "HttpWildfireHeader",
+            "tunnel": "HttpTunnelHeader",
+            "user id": "HttpUserIdHeader",
+            "gtp": "HttpGtpHeader",
+            "auth": "HttpAuthHeader",
+            "sctp": "HttpSctpHeader",
+            "iptag": "HttpIpTagHeader",
+            "decryption": "HttpDecryptionHeader",
+            "globalprotect": "HttpGlobalProtectHeader",
+        }
+
+        self.sdk_cls = ("device", cls_map[module.params["log_type"]])
 
 
 def main():
-
     helper = get_connection(
+        helper_cls=Helper,
         vsys_shared=True,
         device_group=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
-        min_pandevice_version=(0, 11, 1),
+        min_pandevice_version=(1, 10, 0),
         min_panos_version=(8, 0, 0),
-        argument_spec=dict(
-            http_profile=dict(required=True),
+        parents=(("device", "HttpServerProfile", "http_profile"),),
+        sdk_params=dict(
+            header=dict(required=True, sdk_param="name"),
+            value=dict(),
+        ),
+        extra_params=dict(
             log_type=dict(
                 required=True,
                 choices=[
@@ -166,58 +156,20 @@ def main():
                     "auth",
                     "sctp",
                     "iptag",
+                    "decryption",
+                    "globalprotect",
                 ],
             ),
-            header=dict(required=True),
-            value=dict(),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # Verify imports, build pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    sp = HttpServerProfile(module.params["http_profile"])
-    parent.add(sp)
-    try:
-        sp.refresh()
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    cls_map = {
-        "config": HttpConfigHeader,
-        "system": HttpSystemHeader,
-        "threat": HttpThreatHeader,
-        "traffic": HttpTrafficHeader,
-        "hip match": HttpHipMatchHeader,
-        "url": HttpUrlHeader,
-        "data": HttpDataHeader,
-        "wildfire": HttpWildfireHeader,
-        "tunnel": HttpTunnelHeader,
-        "user id": HttpUserIdHeader,
-        "gtp": HttpGtpHeader,
-        "auth": HttpAuthHeader,
-        "sctp": HttpSctpHeader,
-        "iptag": HttpIpTagHeader,
-    }
-
-    cls = cls_map[module.params["log_type"]]
-
-    listing = sp.findall(cls)
-
-    spec = {
-        "name": module.params["header"],
-        "value": module.params["value"],
-    }
-    obj = cls(**spec)
-    sp.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    module.exit_json(changed=changed, diff=diff, msg="Done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

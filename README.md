@@ -2,7 +2,7 @@ PAN-OS Ansible Collection
 =========================
 
 ![CI](https://github.com/PaloAltoNetworks/pan-os-ansible/workflows/CI/badge.svg?branch=develop)
-![Version on Galaxy](https://img.shields.io/badge/dynamic/json?style=flat&label=Ansible+Galaxy&prefix=v&url=https://galaxy.ansible.com/api/v2/collections/paloaltonetworks/panos/&query=latest_version.version)
+![Version on Galaxy](https://img.shields.io/badge/dynamic/json?style=flat&label=Ansible+Galaxy+Latest+Version&prefix=v&url=https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/index/paloaltonetworks/panos/&query=highest_version.version)
 
 Ansible collection that automates the configuration and operational tasks on
 Palo Alto Networks Next Generation Firewalls, both physical and virtualized form
@@ -10,9 +10,9 @@ factors, using the PAN-OS API.
 
 -   Free software: Apache 2.0 License
 -   Documentation:
-    <https://paloaltonetworks.github.io/pan-os-ansible/>
--   PANW community supported live page:
-    <http://live.paloaltonetworks.com/ansible>
+    <https://pan.dev/ansible/docs/panos>
+-   Getting started tutorials, how-to guides and other background reading:
+    <https://pan.dev/ansible/docs/panos>
 -   Repo:
     <https://github.com/PaloAltoNetworks/pan-os-ansible>
 -   Example Playbooks:
@@ -21,8 +21,13 @@ factors, using the PAN-OS API.
 Tested Ansible Versions
 -----------------------
 
-This collection is tested with the most current Ansible 2.9 and 2.10 releases.  Ansible versions
-before 2.9.10 are **not supported**.
+This collection is tested with the most current Ansible releases.  Ansible versions
+before 2.15 are **not supported**.
+
+Python Version
+--------------
+
+The minimum python version for this collection is python 3.9.
 
 Installation
 ------------
@@ -36,28 +41,43 @@ ansible-galaxy collection install paloaltonetworks.panos
 Usage
 -----
 
-Either refer to modules by their full FQCN or use the `collections`
-specification in your playbooks:
+Refer to modules by their full FQCN:
 
 ```yaml
-  collections:
-    - paloaltonetworks.panos
-
   tasks:
-  - name: Get the system info
-    panos_op:
-      provider: '{{ provider }}'
-      cmd: 'show system info'
-    register: res
+    - name: Get the system info
+      paloaltonetworks.panos.panos_op:
+        provider: '{{ device }}'
+        cmd: 'show system info'
+      register: res
 
-  - debug:
-      msg: '{{ res.stdout }}'
+    - name: Show the system info
+      ansible.builtin.debug:
+        msg: '{{ res.stdout }}'
 ```
+(Note that [use of the `collections` key is now discouraged](https://ansible-lint.readthedocs.io/rules/fqcn/))
+
+Releasing, changelogs, versioning and deprecation
+-------------------------------------------------
+There is currently no intended release frequency for major and minor versions. The intended frequency of patch versions is never, they are released for fixing issues or to address security concerns.
+
+Changelog details are created automatically and more recently can be found [here](./CHANGELOG.md), but also the full history is [here](https://github.com/PaloAltoNetworks/pan-os-ansible/releases).
+
+[Semantic versioning](https://semver.org/) is adhered to for this project.
+
+Deprecations are done by version number, not by date or by age of release. Breaking change deprecations will only be made with major versions.
 
 Support
 -------
 
-This template/solution is released under an as-is, best effort, support
+As of version 2.12.2, this Collection of Ansible Modules for PAN-OS is
+[certified on Ansible Automation Hub](https://console.redhat.com/ansible/automation-hub/repo/published/paloaltonetworks/panos)
+and officially supported for Ansible subscribers. Ansible subscribers can engage
+for support through their usual route towards Red Hat.
+
+For those who are not Ansible subscribers, this Collection of Ansible Modules is
+also [published on Ansible Galaxy](https://galaxy.ansible.com/ui/repo/published/paloaltonetworks/panos)
+to be freely used under an as-is, best effort, support
 policy. These scripts should be seen as community supported and Palo
 Alto Networks will contribute our expertise as and when possible. We do
 not provide technical support or help in using or troubleshooting the

@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_service_object
-short_description: Create service objects on PAN-OS devices.
+short_description: Manage service objects on PAN-OS devices.
 description:
-    - Create service objects on PAN-OS devices.
+    - Manage service objects on PAN-OS devices.
 author: "Michael Richardson (@mrichardson03)"
 version_added: '1.0.0'
 requirements:
@@ -37,14 +37,14 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.deprecated_commit
 options:
     name:
         description:
             - Name of service object.
         type: str
-        required: true
     protocol:
         description:
             - Protocol of the service.
@@ -68,11 +68,34 @@ options:
             - List of tags for this service object.
         type: list
         elements: str
+    enable_override_timeout:
+        description:
+            - PAN-OS 8.1 and above.
+            - Override session timeout value.
+        type: str
+        choices: ["no", "yes"]
+    override_timeout:
+        description:
+            - PAN-OS 8.1 and above.
+            - The TCP or UDP session timeout value (in seconds).
+        type: int
+    override_half_close_timeout:
+        description:
+            - PAN-OS 8.1 and above.
+            - Applicable for I(protocol=tcp) only.
+            - TCP session half-close tieout value (in seconds).
+        type: int
+    override_time_wait_timeout:
+        description:
+            - PAN-OS 8.1 and above.
+            - Applicable for I(protocol=tcp) only.
+            - TCP session time-wait timeout value (in seconds).
+        type: int
 """
 
 EXAMPLES = """
 - name: Create service object 'ssh-tcp-22'
-  panos_service_object:
+  paloaltonetworks.panos.panos_service_object:
     provider: '{{ provider }}'
     name: 'ssh-tcp-22'
     destination_port: '22'
@@ -80,14 +103,14 @@ EXAMPLES = """
     tag: ['Prod']
 
 - name: Create service object 'mysql-tcp-3306'
-  panos_service_object:
+  paloaltonetworks.panos.panos_service_object:
     provider: '{{ provider }}'
     name: 'mysql-tcp-3306'
     destination_port: '3306'
     description: 'MySQL on tcp/3306'
 
 - name: Delete service object 'mysql-tcp-3306'
-  panos_service_object:
+  paloaltonetworks.panos.panos_service_object:
     provider: '{{ provider }}'
     name: 'mysql-tcp-3306'
     state: 'absent'
@@ -102,31 +125,28 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.objects import ServiceObject
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.objects import ServiceObject
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys=True,
         device_group=True,
         with_classic_provider_spec=True,
-        with_state=True,
-        argument_spec=dict(
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
+        with_commit=True,
+        min_pandevice_version=(1, 7, 3),
+        sdk_cls=("objects", "ServiceObject"),
+        sdk_params=dict(
             name=dict(type="str", required=True),
             protocol=dict(default="tcp", choices=["tcp", "udp"]),
             source_port=dict(type="str"),
             destination_port=dict(type="str"),
             description=dict(type="str"),
             tag=dict(type="list", elements="str"),
-            commit=dict(type="bool", default=False),
+            enable_override_timeout=dict(choices=["no", "yes"]),
+            override_timeout=dict(type="int"),
+            override_half_close_timeout=dict(type="int"),
+            override_time_wait_timeout=dict(type="int"),
         ),
     )
 
@@ -136,41 +156,7 @@ def main():
         supports_check_mode=True,
     )
 
-    # Verify libs are present, get parent object.
-    parent = helper.get_pandevice_parent(module)
-
-    # Object params.
-    spec = {
-        "name": module.params["name"],
-        "protocol": module.params["protocol"],
-        "source_port": module.params["source_port"],
-        "destination_port": module.params["destination_port"],
-        "description": module.params["description"],
-        "tag": module.params["tag"],
-    }
-
-    # Other info.
-    commit = module.params["commit"]
-
-    # Retrieve current info.
-    try:
-        listing = ServiceObject.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Build the object based on the user spec.
-    obj = ServiceObject(**spec)
-    parent.add(obj)
-
-    # Apply the state.
-    changed, diff = helper.apply_state(obj, listing, module)
-
-    # Commit.
-    if commit and changed:
-        helper.commit(module)
-
-    # Done.
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

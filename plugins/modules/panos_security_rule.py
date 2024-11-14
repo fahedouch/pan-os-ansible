@@ -22,11 +22,19 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_security_rule
-short_description: Create security rule policy on PAN-OS devices or Panorama management console.
-description:
-    - Security policies allow you to enforce rules and take action, and can be as general or specific as needed.
-    - The policy rules are compared against the incoming traffic in sequence, and because the first rule that matches
-    - the traffic is applied, the more specific rules must precede the more general ones.
+short_description: Manage security rule policy on PAN-OS devices or Panorama management console.
+description: >
+    Following rules apply for security policies:
+
+        - Security policies allow you to enforce rules and take action, and can be as
+        general or specific as needed.
+
+        - The policy rules are compared against the incoming traffic in sequence, and
+        because the first rule that matches the traffic is applied, the more specific
+        rules must precede the more general ones.
+
+        - Defaults in spec descriptions apply when I(state=present)/I(state=replaced),
+        or when creating a new resource with I(state=merged).
 author:
     - Ivan Bojer (@ivanbojer)
     - Robert Hagen (@stealthllama)
@@ -40,78 +48,98 @@ notes:
     - Panorama is supported.
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.device_group
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.rulebase
     - paloaltonetworks.panos.fragments.deprecated_commit
+    - paloaltonetworks.panos.fragments.uuid
+    - paloaltonetworks.panos.fragments.target
+    - paloaltonetworks.panos.fragments.movement
+    - paloaltonetworks.panos.fragments.audit_comment
 options:
     rule_name:
         description:
             - Name of the security rule.
         type: str
-        required: true
     source_zone:
         description:
-            - List of source zones.
-        default: ["any"]
+            - List of source zones. Defaults to I(["any"]).
         type: list
         elements: str
     source_ip:
         description:
-            - List of source addresses.
+            - List of source addresses. Defaults to I(["any"]).
             - This can be an IP address, an address object/group, etc.
-        default: ["any"]
+            - When referencing predefined EDLs, use config names of the EDLS not
+              their full names. The config names can be found with the CLI...
+              request system external-list show type predefined-ip name <tab>
+                panw-bulletproof-ip-list   panw-bulletproof-ip-list
+                panw-highrisk-ip-list      panw-highrisk-ip-list
+                panw-known-ip-list         panw-known-ip-list
+                panw-torexit-ip-list       panw-torexit-ip-list
         type: list
         elements: str
     source_user:
         description:
             - Use users to enforce policy for individual users or a group of users.
-        default: ["any"]
+              Defaults to I(["any"]).
         type: list
         elements: str
     hip_profiles:
-        description: >
-            - If you are using GlobalProtect with host information profile (HIP) enabled, you can also base the policy
-            on information collected by GlobalProtect. For example, the user access level can be determined HIP that
-            notifies the firewall about the user's local configuration.
-        default: ["any"]
+        description:
+            - If you are using GlobalProtect with host information profile (HIP)
+              enabled, you can also base the policy on information collected by
+              GlobalProtect. For example, the user access level can be determined
+              HIP that notifies the firewall about the user's local configuration.
+            - NOTE If I(state=present) or I(state=replaced), and you're running
+              PAN-OS < 10.0.0, then this will have a default of I(["any"]).
+            - If you are using PAN-OS >= 10.0.0, please do not use this
+              parameter as it was removed from PAN-OS in 10.0.0.
         type: list
         elements: str
     destination_zone:
         description:
-            - List of destination zones.
-        default: ["any"]
+            - List of destination zones. Defaults to I(["any"]).
         type: list
         elements: str
     destination_ip:
         description:
-            - List of destination addresses.
+            - List of destination addresses. Defaults to I(["any"]).
             - This can be an IP address, an address object/group, etc.
-        default: ["any"]
+            - When referencing predefined EDLs, use config names of the EDLS not
+              their full names. The config names can be found with the CLI...
+              request system external-list show type predefined-ip name <tab>
+                panw-bulletproof-ip-list   panw-bulletproof-ip-list
+                panw-highrisk-ip-list      panw-highrisk-ip-list
+                panw-known-ip-list         panw-known-ip-list
+                panw-torexit-ip-list       panw-torexit-ip-list
         type: list
         elements: str
     application:
         description:
             - List of applications, application groups, and/or application filters.
-        default: ["any"]
+              Defaults to I(["any"]).
         type: list
         elements: str
     service:
         description:
-            - List of services and/or service groups.
-        default: ['application-default']
+            - List of services and/or service groups. Defaults to I(["application-default"]).
         type: list
         elements: str
     category:
         description:
-            - List of destination URL categories.
-        default: ["any"]
+            - List of destination URL categories. Defaults to I(["any"]).
+            - When referencing predefined EDLs, use config names of the EDLS not
+              their full names. The config names can be found with the CLI...
+              request system external-list show type predefined-url name <tab>
+                panw-auth-portal-exclude-list   panw-auth-portal-exclude-list
         type: list
         elements: str
     action:
         description:
-            - Action to apply once rules matches.
+            - Action to apply to the rule. Defaults to I("allow").
         type: str
         choices:
             - allow
@@ -120,20 +148,17 @@ options:
             - reset-client
             - reset-server
             - reset-both
-        default: "allow"
     log_setting:
         description:
             - Log forwarding profile.
         type: str
     log_start:
         description:
-            - Whether to log at session start.
-        default: false
+            - Whether to log at session start. Defaults to I(false).
         type: bool
     log_end:
         description:
-            - Whether to log at session end.
-        default: true
+            - Whether to log at session end. Defaults to I(true).
         type: bool
     description:
         description:
@@ -141,13 +166,12 @@ options:
         type: str
     rule_type:
         description:
-            - Type of security rule (version 6.1 of PanOS and above).
+            - Type of security rule (version 6.1 of PanOS and above). Defaults to I("universal").
         type: str
         choices:
             - universal
             - intrazone
             - interzone
-        default: 'universal'
     tag_name:
         description:
             - List of tags associated with the rule.
@@ -155,18 +179,15 @@ options:
         elements: str
     negate_source:
         description:
-            - Match on the reverse of the 'source_ip' attribute
-        default: false
+            - Match on the reverse of the 'source_ip' attribute. Defaults to I(false).
         type: bool
     negate_destination:
         description:
-            - Match on the reverse of the 'destination_ip' attribute
-        default: false
+            - Match on the reverse of the 'destination_ip' attribute. Defaults to I(false).
         type: bool
     disabled:
         description:
-            - Disable this rule.
-        default: false
+            - Disable this rule. Defaults to I(false).
         type: bool
     schedule:
         description:
@@ -179,12 +200,12 @@ options:
     disable_server_response_inspection:
         description:
             - Disables packet inspection from the server to the client. Useful under heavy server load conditions.
-        default: false
+              Defaults to I(false).
         type: bool
     group_profile:
-        description: >
+        description:
             - Security profile group that is already defined in the system. This property supersedes antivirus,
-            vulnerability, spyware, url_filtering, file_blocking, data_filtering, and wildfire_analysis properties.
+              vulnerability, spyware, url_filtering, file_blocking, data_filtering, and wildfire_analysis properties.
         type: str
     antivirus:
         description:
@@ -214,41 +235,12 @@ options:
         description:
             - Name of the already defined wildfire_analysis profile.
         type: str
-    location:
-        description:
-            - Position to place the created rule in the rule base.  Supported values are
-              I(top)/I(bottom)/I(before)/I(after).
-        type: str
-        choices:
-            - top
-            - bottom
-            - before
-            - after
-    existing_rule:
-        description:
-            - If 'location' is set to 'before' or 'after', this option specifies an existing
-              rule name.  The new rule will be created in the specified position relative to this
-              rule.  If 'location' is set to 'before' or 'after', this option is required.
-        type: str
     devicegroup:
         description:
             - B(Deprecated)
             - Use I(device_group) instead.
             - HORIZONTALLINE
             - Device groups are logical groups of firewalls in Panorama.
-        type: str
-    target:
-        description:
-            - Apply this rule exclusively to the listed firewalls in Panorama.
-        type: list
-        elements: str
-    negate_target:
-        description:
-            - Exclude this rule from the listed firewalls in Panorama.
-        type: bool
-    audit_comment:
-        description:
-            - Add an audit comment to the rule being defined.
         type: str
     group_tag:
         description:
@@ -258,7 +250,7 @@ options:
 
 EXAMPLES = """
 - name: add SSH inbound rule to Panorama device group
-  panos_security_rule:
+  paloaltonetworks.panos.panos_security_rule:
     provider: '{{ provider }}'
     device_group: 'Cloud Edge'
     rule_name: 'SSH permit'
@@ -272,7 +264,7 @@ EXAMPLES = """
     action: 'allow'
 
 - name: add a rule to allow HTTP multimedia only to CDNs
-  panos_security_rule:
+  paloaltonetworks.panos.panos_security_rule:
     provider: '{{ provider }}'
     rule_name: 'HTTP Multimedia'
     description: 'Allow HTTP multimedia only to host at 1.1.1.1'
@@ -284,7 +276,7 @@ EXAMPLES = """
     action: 'allow'
 
 - name: add a more complex rule that uses security profiles
-  panos_security_rule:
+  paloaltonetworks.panos.panos_security_rule:
     provider: '{{ provider }}'
     rule_name: 'Allow HTTP'
     source_zone: ['public']
@@ -299,7 +291,7 @@ EXAMPLES = """
     wildfire_analysis: 'default'
 
 - name: disable a Panorama pre-rule
-  panos_security_rule:
+  paloaltonetworks.panos.panos_security_rule:
     provider: '{{ provider }}'
     device_group: 'Production edge'
     rule_name: 'Allow telnet'
@@ -313,14 +305,14 @@ EXAMPLES = """
     disabled: true
 
 - name: delete a device group security rule
-  panos_security_rule:
+  paloaltonetworks.panos.panos_security_rule:
     provider: '{{ provider }}'
     state: 'absent'
     device_group: 'DC Firewalls'
     rule_name: 'Allow telnet'
 
 - name: add a rule at a specific location in the rulebase
-  panos_security_rule:
+  paloaltonetworks.panos.panos_security_rule:
     provider: '{{ provider }}'
     rule_name: 'SSH permit'
     description: 'SSH rule test'
@@ -343,48 +335,73 @@ RETURN = """
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos import (
+    ConnectionHelper,
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.policies import RuleAuditComment, SecurityRule
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.policies import SecurityRule
-    except ImportError:
-        pass
 
+class Helper(ConnectionHelper):
+    def initial_handling(self, module):
+        # TODO(gfreeman) - remove when devicegroup is removed.
+        if module.params["devicegroup"] is not None:
+            module.deprecate(
+                'Param "devicegroup" is deprecated; use "device_group"',
+                version="3.0.0",
+                collection_name="paloaltonetworks.panos",
+            )
+            if module.params["device_group"] is not None:
+                msg = [
+                    'Both "devicegroup" and "device_group" are specified',
+                    "Specify one or the other, not both.",
+                ]
+                module.fail_json(msg=". ".join(msg))
+            module.params["device_group"] = module.params["devicegroup"]
 
-ACCEPTABLE_MOVE_ERRORS = (
-    "already at the top",
-    "already at the bottom",
-)
+    def spec_handling(self, spec, module):
+        if module.params["state"] not in ("present", "replaced"):
+            return
+
+        # The hip-profiles was removed somewhere in PAN-OS v10, either
+        # v10.1.5 or before (one user says it's gone for them in v10.0.0),
+        # and it is gone in pan-os-python, but the Ansible collection needs
+        # to have some extra code so as to maintain functionality (read:
+        # default values) for uses who are running older PAN-OS versions so
+        # as to not create regressions in their automation.
+        if self.device._version_info < (10, 0, 0) and spec["hip_profiles"] is None:
+            spec["hip_profiles"] = [
+                "any",
+            ]
 
 
 def main():
     helper = get_connection(
+        helper_cls=Helper,
         vsys=True,
         device_group=True,
         rulebase=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
         error_on_firewall_shared=True,
         min_pandevice_version=(1, 5, 0),
-        argument_spec=dict(
-            rule_name=dict(required=True),
-            source_zone=dict(type="list", elements="str", default=["any"]),
-            source_ip=dict(type="list", elements="str", default=["any"]),
-            source_user=dict(type="list", elements="str", default=["any"]),
-            hip_profiles=dict(type="list", elements="str", default=["any"]),
-            destination_zone=dict(type="list", elements="str", default=["any"]),
-            destination_ip=dict(type="list", elements="str", default=["any"]),
-            application=dict(type="list", elements="str", default=["any"]),
-            service=dict(type="list", elements="str", default=["application-default"]),
-            category=dict(type="list", elements="str", default=["any"]),
+        with_uuid=True,
+        with_commit=True,
+        with_target=True,
+        with_movement=True,
+        with_audit_comment=True,
+        sdk_cls=("policies", "SecurityRule"),
+        sdk_params=dict(
+            rule_name=dict(required=True, sdk_param="name"),
+            source_zone=dict(type="list", elements="str", sdk_param="fromzone"),
+            source_ip=dict(type="list", elements="str", sdk_param="source"),
+            source_user=dict(type="list", elements="str"),
+            hip_profiles=dict(type="list", elements="str"),
+            destination_zone=dict(type="list", elements="str", sdk_param="tozone"),
+            destination_ip=dict(type="list", elements="str", sdk_param="destination"),
+            application=dict(type="list", elements="str"),
+            service=dict(type="list", elements="str"),
+            category=dict(type="list", elements="str"),
             action=dict(
-                default="allow",
                 choices=[
                     "allow",
                     "deny",
@@ -395,135 +412,71 @@ def main():
                 ],
             ),
             log_setting=dict(),
-            log_start=dict(type="bool", default=False),
-            log_end=dict(type="bool", default=True),
+            log_start=dict(type="bool"),
+            log_end=dict(type="bool"),
             description=dict(),
             rule_type=dict(
-                default="universal", choices=["universal", "intrazone", "interzone"]
+                choices=["universal", "intrazone", "interzone"],
+                sdk_param="type",
             ),
-            tag_name=dict(type="list", elements="str"),
-            negate_source=dict(type="bool", default=False),
-            negate_destination=dict(type="bool", default=False),
-            disabled=dict(type="bool", default=False),
+            tag_name=dict(type="list", elements="str", sdk_param="tag"),
+            negate_source=dict(type="bool"),
+            negate_destination=dict(type="bool"),
+            disabled=dict(type="bool"),
             schedule=dict(),
             icmp_unreachable=dict(type="bool"),
-            disable_server_response_inspection=dict(type="bool", default=False),
-            group_profile=dict(),
-            antivirus=dict(),
+            disable_server_response_inspection=dict(type="bool"),
+            group_profile=dict(sdk_param="group"),
+            antivirus=dict(sdk_param="virus"),
             spyware=dict(),
             vulnerability=dict(),
             url_filtering=dict(),
             file_blocking=dict(),
             wildfire_analysis=dict(),
             data_filtering=dict(),
-            target=dict(type="list", elements="str"),
-            negate_target=dict(type="bool"),
-            location=dict(choices=["top", "bottom", "before", "after"]),
-            existing_rule=dict(),
-            commit=dict(type="bool", default=False),
-            audit_comment=dict(type="str"),
             group_tag=dict(),
+        ),
+        extra_params=dict(
             # TODO(gfreeman) - remove this in the next role release.
             devicegroup=dict(),
         ),
+        default_values=dict(
+            source_zone=["any"],
+            source_ip=["any"],
+            source_user=["any"],
+            destination_zone=["any"],
+            destination_ip=["any"],
+            application=["any"],
+            service=["application-default"],
+            category=["any"],
+            action="allow",
+            log_start=False,
+            log_end=True,
+            rule_type="universal",
+            negate_source=False,
+            negate_destination=False,
+            disabled=False,
+            disable_server_response_inspection=False,
+        ),
+        preset_values=dict(
+            source_zone=["any"],
+            source_ip=["any"],
+            source_user=["any", "pre-logon", "known-user", "unknown"],
+            destination_zone=["any", "multicast"],
+            destination_ip=["any"],
+            application=["any"],
+            service=["application-default", "any"],
+            category=["any"],
+        ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # TODO(gfreeman) - remove when devicegroup is removed.
-    if module.params["devicegroup"] is not None:
-        module.deprecate(
-            'Param "devicegroup" is deprecated; use "device_group"',
-            version="3.0.0",
-            collection_name="paloaltonetworks.panos",
-        )
-        if module.params["device_group"] is not None:
-            msg = [
-                'Both "devicegroup" and "device_group" are specified',
-                "Specify one or the other, not both.",
-            ]
-            module.fail_json(msg=". ".join(msg))
-        module.params["device_group"] = module.params["devicegroup"]
-
-    # Verify imports, build pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    # Set the SecurityRule object params.
-    rule_spec = {
-        "name": module.params["rule_name"],
-        "fromzone": module.params["source_zone"],
-        "tozone": module.params["destination_zone"],
-        "source": module.params["source_ip"],
-        "source_user": module.params["source_user"],
-        "hip_profiles": module.params["hip_profiles"],
-        "destination": module.params["destination_ip"],
-        "application": module.params["application"],
-        "service": module.params["service"],
-        "category": module.params["category"],
-        "action": module.params["action"],
-        "log_setting": module.params["log_setting"],
-        "log_start": module.params["log_start"],
-        "log_end": module.params["log_end"],
-        "description": module.params["description"],
-        "type": module.params["rule_type"],
-        "tag": module.params["tag_name"],
-        "negate_source": module.params["negate_source"],
-        "negate_destination": module.params["negate_destination"],
-        "disabled": module.params["disabled"],
-        "schedule": module.params["schedule"],
-        "icmp_unreachable": module.params["icmp_unreachable"],
-        "disable_server_response_inspection": module.params[
-            "disable_server_response_inspection"
-        ],
-        "group": module.params["group_profile"],
-        "virus": module.params["antivirus"],
-        "spyware": module.params["spyware"],
-        "vulnerability": module.params["vulnerability"],
-        "url_filtering": module.params["url_filtering"],
-        "file_blocking": module.params["file_blocking"],
-        "wildfire_analysis": module.params["wildfire_analysis"],
-        "data_filtering": module.params["data_filtering"],
-        "target": module.params["target"],
-        "negate_target": module.params["negate_target"],
-        "group_tag": module.params["group_tag"],
-    }
-
-    # Other module info.
-    location = module.params["location"]
-    existing_rule = module.params["existing_rule"]
-    commit = module.params["commit"]
-    audit_comment = module.params["audit_comment"]
-
-    # Retrieve the current rules.
-    try:
-        rules = SecurityRule.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Create new rule object from the params.
-    new_rule = SecurityRule(**rule_spec)
-    parent.add(new_rule)
-
-    # Which action shall we take on the rule object?
-    changed, diff = helper.apply_state(new_rule, rules, module)
-
-    # Move the rule to the correct spot, if applicable.
-    if module.params["state"] == "present":
-        changed |= helper.apply_position(new_rule, location, existing_rule, module)
-
-    # Add the audit comment, if applicable.
-    if changed and audit_comment and not module.check_mode:
-        new_rule.opstate.audit_comment.update(audit_comment)
-
-    # Optional commit.
-    if changed and commit:
-        helper.commit(module)
-
-    # Done.
-    module.exit_json(changed=changed, diff=diff, msg="Done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

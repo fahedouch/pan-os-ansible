@@ -31,7 +31,8 @@ author:
     - Garfield Lee Freeman (@shinmog)
 version_added: '1.0.0'
 deprecated:
-    alternative: 'Use M(panos_commit_firewall), M(panos_commit_panorama), M(panos_commit_push) instead.'
+    alternative: 'Use M(paloaltonetworks.panos.panos_commit_firewall), M(paloaltonetworks.panos.panos_commit_panorama),
+    M(paloaltonetworks.panos.panos_commit_push) instead.'
     removed_in: '3.0.0'
     why: 'This module is a subset of functionality found in other modules.'
 requirements:
@@ -61,18 +62,18 @@ options:
 
 EXAMPLES = """
 - name: commit candidate config on firewall
-  panos_commit:
+  paloaltonetworks.panos.panos_commit:
     provider: '{{ provider }}'
 
 - name: commit candidate config on Panorama
-  panos_commit:
+  paloaltonetworks.panos.panos_commit:
     provider: '{{ provider }}'
     device_group: 'Cloud-Edge'
 
 - name: commit changes by specified admins to firewall
-  panos_commit:
+  paloaltonetworks.panos.panos_commit:
     provider: '{{ provider }}'
-    admins: ['admin1','admin2']
+    admins: ['admin1', 'admin2']
 """
 
 RETURN = """

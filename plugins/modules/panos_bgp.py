@@ -22,7 +22,7 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_bgp
-short_description: Configures Border Gateway Protocol (BGP)
+short_description: Manage Border Gateway Protocol (BGP)
 description:
     - Use BGP to publish and consume routes from disparate networks.
 author:
@@ -143,7 +143,7 @@ options:
 
 EXAMPLES = """
 - name: Configure and enable BGP
-  panos_bgp:
+  paloaltonetworks.panos.panos_bgp:
     provider: '{{ provider }}'
     router_id: '1.1.1.1'
     local_as: '64512'
@@ -192,7 +192,7 @@ def setup_args():
         confederation_member_as=dict(type="str"),
         aggregate_med=dict(type="bool", default=True),
         vr_name=dict(default="default"),
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
     )
 
 
@@ -265,12 +265,13 @@ def main():
     parent.add(bgp)
 
     # Apply the state.
-    changed, diff = helper.apply_state(bgp, listing, module, "enable")
+    resp = helper.apply_state(bgp, listing, module, "enable")
 
-    if commit and changed:
+    if commit and resp["changed"]:
         helper.commit(module)
 
-    module.exit_json(msg="BGP configuration successful.", changed=changed, diff=diff)
+    resp["msg"] = "BGP configuration successful."
+    module.exit_json(**resp)
 
 
 if __name__ == "__main__":

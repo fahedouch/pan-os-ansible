@@ -55,24 +55,22 @@ options:
         description:
             - commit if changed
         type: bool
-        required: false
-        default: false
 """
 
 EXAMPLES = """
 # Import and load config file from URL
-  - name: import configuration
-    panos_import:
-      ip_address: "192.168.1.1"
-      password: "admin"
-      url: "{{ConfigURL}}"
-      category: "configuration"
-    register: result
-  - name: load configuration
-    panos_loadcfg:
-      ip_address: "192.168.1.1"
-      password: "admin"
-      file: "{{result.filename}}"
+- name: import configuration
+  paloaltonetworks.panos.panos_import:
+    ip_address: "192.168.1.1"
+    password: "admin"
+    url: "{{ConfigURL}}"
+    category: "configuration"
+  register: result
+- name: load configuration
+  paloaltonetworks.panos.panos_loadcfg:
+    ip_address: "192.168.1.1"
+    password: "admin"
+    file: "{{result.filename}}"
 """
 
 RETURN = """
@@ -104,7 +102,7 @@ def main():
         password=dict(required=True, no_log=True),
         username=dict(default="admin"),
         file=dict(),
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=False)
     if not HAS_LIB:

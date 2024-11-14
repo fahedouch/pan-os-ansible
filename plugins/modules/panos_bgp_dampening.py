@@ -23,7 +23,7 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_bgp_dampening
-short_description: Configures a BGP Dampening Profile
+short_description: Manage a BGP Dampening Profile
 description:
     - Use BGP to publish and consume routes from disparate networks.
 author:
@@ -39,13 +39,14 @@ notes:
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.full_template_support
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
     - paloaltonetworks.panos.fragments.deprecated_commit
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     vr_name:
         description:
             - Name of the virtual router; it must already exist.
-            - See M(panos_virtual_router).
+            - See M(paloaltonetworks.panos.panos_virtual_router).
         type: str
         default: 'default'
     cutoff:
@@ -73,7 +74,6 @@ options:
         description:
             - Name of Dampening Profile.
         type: str
-        required: True
     reuse:
         description:
             - Reuse threshold value.
@@ -82,7 +82,7 @@ options:
 
 EXAMPLES = """
 - name: Create BGP Dampening Profile
-  panos_bgp_dampening:
+  paloaltonetworks.panos.panos_bgp_dampening:
     name: damp-profile-1
     enable: true
     commit: true
@@ -97,38 +97,29 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.network import Bgp, BgpDampeningProfile, VirtualRouter
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.network import Bgp, BgpDampeningProfile, VirtualRouter
-    except ImportError:
-        pass
-
-
-def setup_args():
-    return dict(
-        commit=dict(type="bool", default=False),
-        vr_name=dict(default="default"),
-        name=dict(type="str", required=True),
-        enable=dict(default=True, type="bool"),
-        cutoff=dict(type="float"),
-        reuse=dict(type="float"),
-        max_hold_time=dict(type="int"),
-        decay_half_life_reachable=dict(type="int"),
-        decay_half_life_unreachable=dict(type="int"),
-    )
-
 
 def main():
     helper = get_connection(
         template=True,
         template_stack=True,
-        with_state=True,
+        with_network_resource_module_state=True,
         with_classic_provider_spec=True,
-        argument_spec=setup_args(),
+        with_commit=True,
+        with_gathered_filter=True,
+        parents=(
+            ("network", "VirtualRouter", "vr_name", "default"),
+            ("network", "Bgp", None),
+        ),
+        sdk_cls=("network", "BgpDampeningProfile"),
+        sdk_params=dict(
+            name=dict(type="str", required=True),
+            enable=dict(default=True, type="bool"),
+            cutoff=dict(type="float"),
+            reuse=dict(type="float"),
+            max_hold_time=dict(type="int"),
+            decay_half_life_reachable=dict(type="int"),
+            decay_half_life_unreachable=dict(type="int"),
+        ),
     )
 
     module = AnsibleModule(
@@ -137,43 +128,7 @@ def main():
         required_one_of=helper.required_one_of,
     )
 
-    # Verify libs, initialize pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    vr = VirtualRouter(module.params["vr_name"])
-    parent.add(vr)
-    try:
-        vr.refresh()
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    bgp = vr.find("", Bgp)
-    if bgp is None:
-        module.fail_json(
-            msg='BGP is not configured for virtual router "{0}"'.format(vr.name)
-        )
-
-    listing = bgp.findall(BgpDampeningProfile)
-    spec = {
-        "name": module.params["name"],
-        "enable": module.params["enable"],
-        "cutoff": module.params["cutoff"],
-        "reuse": module.params["reuse"],
-        "max_hold_time": module.params["max_hold_time"],
-        "decay_half_life_reachable": module.params["decay_half_life_reachable"],
-        "decay_half_life_unreachable": module.params["decay_half_life_unreachable"],
-    }
-    obj = BgpDampeningProfile(**spec)
-    bgp.add(obj)
-
-    # Apply the requested state.
-    changed, diff = helper.apply_state(obj, listing, module)
-
-    # Optional commit.
-    if changed and module.params["commit"]:
-        helper.commit(module)
-
-    module.exit_json(changed=changed, diff=diff, msg="done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

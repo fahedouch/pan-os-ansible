@@ -1,12 +1,18 @@
 # Integration Tests
-
+ 
 ## Setup
 
 Test playbooks assume that firewalls have the following initial configuration:
 
-- `ethernet1/1` in `untrust` zone
-- `ethernet1/2` in `trust` zone
+- `ethernet1/1` in `outside` zone
+- `ethernet1/2` in `inside` zone
 - DHCP management configuration
+- a CA certificate with key named `local-ca` marked as `forward trust`
+
+And panoramas to have:
+
+- `Test-DG` device group
+- `Test-Template` template
 
 Add firewalls to `firewall` group in inventory, Panorama instances to
 `panoramas` group (see `inventory.example`):
@@ -27,13 +33,13 @@ booted, and save a copy of the config into `blank.xml` on the device.
 ### Run a single test
 
 ```
-ansible-playbook -i inventory run_single_test.yml -e test=test_panos_address_object
+ansible-playbook -i inventory.ini run_single_test.yml -e test=test_panos_address_object
 ```
 
 ### Run all tests
 
 ```
-ansible-playbook -i inventory run_all_tests.yml
+ansible-playbook -i inventory.ini run_all_tests.yml
 ```
 
 ## Writing a test
@@ -45,7 +51,7 @@ ansible-playbook -i inventory run_all_tests.yml
 - import_tasks: 'reset.yml'
 
 - name: test_panos_address_object - Create
-  panos_address_object:
+  paloaltonetworks.panos.panos_address_object:
     provider: '{{ device }}'
     name: 'Test-One'
     value: '1.1.1.1'
@@ -60,7 +66,7 @@ ansible-playbook -i inventory run_all_tests.yml
       - result is changed
 
 - name: test_panos_address_object - Create (idempotence)
-  panos_address_object:
+  paloaltonetworks.panos.panos_address_object:
     provider: '{{ device }}'
     name: 'Test-One'
     value: '1.1.1.1'
@@ -75,7 +81,7 @@ ansible-playbook -i inventory run_all_tests.yml
       - result is not changed
 
 - name: test_panos_address_object - Modify
-  panos_address_object:
+  paloaltonetworks.panos.panos_address_object:
     provider: '{{ device }}'
     name: 'Test-One'
     value: '2.2.2.2'
@@ -89,7 +95,7 @@ ansible-playbook -i inventory run_all_tests.yml
       - result is changed
 
 - name: test_panos_address_object - Delete
-  panos_address_object:
+  paloaltonetworks.panos.panos_address_object:
     provider: '{{ device }}'
     name: 'Test-One'
     state: 'absent'
@@ -103,7 +109,7 @@ ansible-playbook -i inventory run_all_tests.yml
       - result is changed
 
 - name: test_panos_address_object - Make sure changes commit cleanly
-  panos_commit:
+  paloaltonetworks.panos.panos_commit_firewall:
     provider: '{{ device }}'
   register: result
 

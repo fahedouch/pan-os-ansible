@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_custom_url_category
-short_description: Create custom url category objects on PAN-OS devices.
+short_description: Manage custom url category objects on PAN-OS devices.
 description:
-    - Create custom url category objects on PAN-OS devices.
+    - Manage custom url category objects on PAN-OS devices.
 author: "Borislav Varadinov (@bvaradinov-c)"
 version_added: '2.0.0'
 requirements:
@@ -37,13 +37,13 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     name:
         description:
-            - Name of the tag.
+            - Name of the url category.
         type: str
-        required: true
     description:
         description:
             - Descriptive name for this custom url category.
@@ -63,16 +63,16 @@ options:
 
 EXAMPLES = """
 - name: Create Custom Url Category 'Internet Access List'
-  panos_custom_url_category:
+  paloaltonetworks.panos.panos_custom_url_category:
     provider: '{{ provider }}'
     name: 'Internet Access List'
     description: 'Description One'
     url_value:
-        - microsoft.com
-        - redhat.com
+      - microsoft.com
+      - redhat.com
 
 - name: Remove Custom Url Category 'Internet Access List'
-  panos_custom_url_category:
+  paloaltonetworks.panos.panos_custom_url_category:
     provider: '{{ provider }}'
     name: 'Internet Access List'
     state: 'absent'
@@ -87,64 +87,31 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.objects import CustomUrlCategory
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.objects import CustomUrlCategory
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys=True,
         device_group=True,
+        min_pandevice_version=(1, 5, 0),
         with_classic_provider_spec=True,
-        with_state=True,
-        argument_spec=dict(
-            name=dict(type="str", required=True),
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
+        sdk_cls=("objects", "CustomUrlCategory"),
+        sdk_params=dict(
+            name=dict(required=True),
             description=dict(),
             url_value=dict(type="list", elements="str"),
-            type=dict(
-                type="str", choices=["URL List", "Category Match"], default="URL List"
-            ),
+            type=dict(default="URL List", choices=["URL List", "Category Match"]),
         ),
     )
-
-    required_if = [["state", "present", ["url_value"]]]
 
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         required_one_of=helper.required_one_of,
-        required_if=required_if,
         supports_check_mode=True,
     )
 
-    parent = helper.get_pandevice_parent(module)
-    device = parent.nearest_pandevice()
-
-    spec = {
-        "name": module.params["name"],
-        "description": module.params["description"],
-        "url_value": module.params["url_value"],
-    }
-
-    if device.get_device_version() >= (9, 0, 0):
-        spec.update({"type": module.params["type"]})
-
-    try:
-        listing = CustomUrlCategory.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    obj = CustomUrlCategory(**spec)
-    parent.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

@@ -50,18 +50,18 @@ options:
 
 EXAMPLES = """
 - name: Get facts for all registered IPs
-  panos_registered_ip_facts:
+  paloaltonetworks.panos.panos_registered_ip_facts:
     provider: '{{ provider }}'
   register: registered_ip_facts
 
 - name: Get facts for specific tag
-  panos_registered_ip_facts:
+  paloaltonetworks.panos.panos_registered_ip_facts:
     provider: '{{ provider }}'
     tags: ['First_Tag']
   register: first_tag_registered_ip_facts
 
 - name: Get facts for a specific IP address
-  panos_registered_ip_facts:
+  paloaltonetworks.panos.panos_registered_ip_facts:
     provider: '{{ provider }}'
     ips: ['192.168.1.1']
   register: ipaddress_registered_ip_facts
@@ -101,7 +101,9 @@ def main():
     )
 
     module = AnsibleModule(
-        argument_spec=helper.argument_spec, required_one_of=helper.required_one_of
+        argument_spec=helper.argument_spec,
+        supports_check_mode=True,
+        required_one_of=helper.required_one_of,
     )
 
     tags = module.params["tags"]

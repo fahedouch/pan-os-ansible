@@ -92,6 +92,11 @@ options:
         description:
             - Passphrase used to encrypt the certificate and/or private key.
         type: str
+    create_directory:
+        description:
+            - Whether to create directory when exporting.
+        type: bool
+        default: False
     filename:
         description:
             - Local path to output file (if any).
@@ -147,25 +152,25 @@ options:
 
 EXAMPLES = """
 - name: Export configuration
-  panos_export:
+  paloaltonetworks.panos.panos_export:
     provider: '{{ provider }}'
     category: 'configuration'
     filename: 'running-config.xml'
 
 - name: Export application block page
-  panos_export:
+  paloaltonetworks.panos.panos_export:
     provider: '{{ provider }}'
     category: 'application-block-page'
     filename: 'application-block-page.html'
 
 - name: Export tech support (module will wait until file is ready)
-  panos_export:
+  paloaltonetworks.panos.panos_export:
     provider: '{{ provider }}'
     category: 'tech-support'
     filename: 'tech-support.tgz'
 
 - name: Export threat packet capture
-  panos_export:
+  paloaltonetworks.panos.panos_export:
     provider: '{{ provider }}'
     category: 'threat-pcap'
     threat_pcap_id: '1206450340254187521'
@@ -194,17 +199,14 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
 )
 
 try:
-    from panos.errors import PanDeviceError
     from panos.panorama import Panorama
 except ImportError:
     try:
-        from pandevice.errors import PanDeviceError
         from pandevice.panorama import Panorama
     except ImportError:
         pass
 
 try:
-    import pan.xapi
     import xmltodict
 
     HAS_LIB = True
@@ -212,17 +214,19 @@ except ImportError:
     HAS_LIB = False
 
 import json
-import os
+import pathlib
 import time
 import xml.etree.ElementTree as ET
 
 
-def export_text(module, xapi, category, filename):
+def export_text(module, xapi, category, filename, create_directory):
     xapi.export(category=category)
 
     f = None
 
     try:
+        if create_directory:
+            pathlib.Path(filename).parent.mkdir(parents=True, exist_ok=True)
         with open(filename, "w") as f:
             if category == "configuration":
                 f.write(xapi.xml_root())
@@ -235,12 +239,14 @@ def export_text(module, xapi, category, filename):
         module.fail_json(msg=msg)
 
 
-def export_binary(module, xapi, category, filename):
+def export_binary(module, xapi, category, filename, create_directory):
     f = None
 
     xapi.export(category=category)
 
     try:
+        if create_directory:
+            pathlib.Path(filename).parent.mkdir(parents=True, exist_ok=True)
         with open(filename, "wb") as f:
             content = xapi.export_result["content"]
 
@@ -252,8 +258,30 @@ def export_binary(module, xapi, category, filename):
         module.fail_json(msg=msg)
 
 
-def export_async(module, xapi, category, filename, interval=60, timeout=600):
+def save_binary(module, xapi, category, filename, create_directory):
+    # This function is almost the same as export_binary, but omits the line...
+    #   xapi.export(category=category)
+    # This function is therefore used where the xapi.export operation is already done
 
+    f = None
+
+    try:
+        if create_directory:
+            pathlib.Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        with open(filename, "wb") as f:
+            content = xapi.export_result["content"]
+
+            if content is not None:
+                f.write(content)
+
+            f.close()
+    except IOError as msg:
+        module.fail_json(msg=msg)
+
+
+def export_async(
+    module, xapi, category, filename, interval=60, timeout=600, create_directory=False
+):
     # Submit job, get resulting job id
     xapi.export(category=category)
     job_result = ET.fromstring(xapi.xml_root())
@@ -280,7 +308,8 @@ def export_async(module, xapi, category, filename, interval=60, timeout=600):
 
     # Get completed job
     xapi.export(category=category, extra_qs={"action": "get", "job-id": job_id})
-    export_binary(module, xapi, filename)
+
+    save_binary(module, xapi, category, filename, create_directory)
 
 
 HTML_EXPORTS = [
@@ -326,6 +355,7 @@ def main():
             certificate_format=dict(type="str", choices=["pem", "pkcs10", "pkcs12"]),
             certificate_include_keys=dict(type="bool", default=False),
             certificate_passphrase=dict(type="str", no_log=True),
+            create_directory=dict(type="bool", default=False),
             application_pcap_name=dict(type="str"),
             dlp_pcap_name=dict(type="str"),
             dlp_password=dict(type="str", no_log=True),
@@ -355,6 +385,7 @@ def main():
     category = module.params["category"]
     filename = module.params["filename"]
     timeout = module.params["timeout"]
+    create_directory = module.params["create_directory"]
 
     parent = helper.get_pandevice_parent(module)
     xapi = parent.xapi
@@ -363,7 +394,7 @@ def main():
         if filename is None:
             module.fail_json(msg="filename is required for export")
 
-        export_text(module, xapi, category, filename)
+        export_text(module, xapi, category, filename, create_directory)
 
     elif category in FILE_EXPORTS:
         if filename is None:
@@ -372,13 +403,20 @@ def main():
         if category == "stats-dump" and isinstance(parent, Panorama):
             module.fail_json(msg="stats-dump is not supported on Panorama")
 
-        export_async(module, xapi, category, filename, timeout=timeout)
+        export_async(
+            module,
+            xapi,
+            category,
+            filename,
+            timeout=timeout,
+            create_directory=create_directory,
+        )
 
     elif category == "device-state":
         if filename is None:
             module.fail_json(msg="filename is required for export")
 
-        export_binary(module, xapi, category, filename)
+        export_binary(module, xapi, category, filename, create_directory)
 
     elif category == "certificate":
         if filename is None:
@@ -404,10 +442,9 @@ def main():
             params["passphrase"] = cert_passphrase
 
         xapi.export(category="certificate", extra_qs=params)
-        export_binary(module, xapi, filename)
+        save_binary(module, xapi, category, filename, create_directory)
 
     elif category == "application-pcap":
-
         # When exporting an application pcap, from_name can be:
         #   - nothing, which gets you a list of directories
         #   - a directory name, which gets you a list of pcaps in that directory
@@ -426,10 +463,9 @@ def main():
             if filename is None:
                 module.fail_json(msg="filename is required for export")
 
-            export_binary(module, xapi, filename)
+            save_binary(module, xapi, category, filename, create_directory)
 
     elif category == "filter-pcap":
-
         # When exporting a filter pcap, from_name can be:
         #   - nothing, which gets you a list of files
         #   - a filename, which gets you the pcap file
@@ -447,7 +483,7 @@ def main():
             if filename is None:
                 module.fail_json(msg="filename is required for export")
 
-            export_binary(module, xapi, filename)
+            save_binary(module, xapi, category, filename, create_directory)
 
     elif category == "dlp-pcap":
         from_name = module.params["dlp_pcap_name"]
@@ -472,7 +508,7 @@ def main():
             if filename is None:
                 module.fail_json(msg="filename is required for export")
 
-            export_binary(module, xapi, filename)
+            save_binary(module, xapi, category, filename, create_directory)
 
     elif category == "threat-pcap":
         if filename is None:
@@ -495,7 +531,7 @@ def main():
             search_time=search_time,
             serialno=serial,
         )
-        export_binary(module, xapi, filename)
+        save_binary(module, xapi, category, filename, create_directory)
 
     module.exit_json(changed=False)
 

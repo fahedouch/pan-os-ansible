@@ -28,9 +28,9 @@ ANSIBLE_METADATA = {
 DOCUMENTATION = """
 ---
 module: panos_region
-short_description: Create regions on PAN-OS devices.
+short_description: Manage regions on PAN-OS devices.
 description:
-    - Create regions on PAN-OS devices.
+    - Manage regions on PAN-OS devices.
 author: "Michael Richardson (@mrichardson03)"
 version_added: '2.1.0'
 requirements:
@@ -43,13 +43,13 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     name:
         description:
             - Name of the object.
         type: str
-        required: true
     address:
         description:
             - List of IP networks
@@ -67,11 +67,11 @@ options:
 
 EXAMPLES = """
 - name: Create region
-  panos_region:
+  paloaltonetworks.panos.panos_region:
     provider: '{{ provider }}'
     name: 'Palo-Alto-Networks'
     address:
-        - '192.168.0.0/16'
+      - '192.168.0.0/16'
     latitude: 37.383415
     longitude: -121.982882
 """
@@ -85,16 +85,6 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.objects import Region
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.objects import Region
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
@@ -102,8 +92,10 @@ def main():
         device_group=True,
         min_panos_version=(9, 1, 0),
         with_classic_provider_spec=True,
-        with_state=True,
-        argument_spec=dict(
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
+        sdk_cls=("objects", "Region"),
+        sdk_params=dict(
             name=dict(type="str", required=True),
             address=dict(type="list", elements="str"),
             latitude=dict(type="float"),
@@ -117,25 +109,7 @@ def main():
         supports_check_mode=True,
     )
 
-    parent = helper.get_pandevice_parent(module)
-
-    spec = {
-        "name": module.params["name"],
-        "address": module.params["address"],
-        "latitude": module.params["latitude"],
-        "longitude": module.params["longitude"],
-    }
-
-    try:
-        listing = Region.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    obj = Region(**spec)
-    parent.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

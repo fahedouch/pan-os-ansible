@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_gre_tunnel
-short_description: Create GRE tunnels on PAN-OS devices.
+short_description: Manage GRE tunnels on PAN-OS devices.
 description:
-    - Create GRE tunnel objects on PAN-OS devices.
+    - Manage GRE tunnel objects on PAN-OS devices.
 author:
     - Garfield Lee Freeman (@shinmog)
 version_added: '1.0.0'
@@ -38,13 +38,13 @@ notes:
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.full_template_support
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     name:
         description:
             - Name of object to create.
         type: str
-        required: true
     interface:
         description:
             - Interface to terminate the tunnel.
@@ -105,7 +105,7 @@ options:
 
 EXAMPLES = """
 - name: Create GRE tunnel
-  panos_gre_tunnel:
+  paloaltonetworks.panos.panos_gre_tunnel:
     provider: '{{ provider }}'
     name: 'myGreTunnel'
     interface: 'ethernet1/5'
@@ -124,26 +124,18 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.network import GreTunnel
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.network import GreTunnel
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         template=True,
         template_stack=True,
         with_classic_provider_spec=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         min_pandevice_version=(0, 13, 0),
         min_panos_version=(9, 0, 0),
-        argument_spec=dict(
+        sdk_cls=("network", "GreTunnel"),
+        sdk_params=dict(
             name=dict(required=True),
             interface=dict(),
             local_address_type=dict(default="ip", choices=["ip", "floating-ip"]),
@@ -166,41 +158,7 @@ def main():
         supports_check_mode=True,
     )
 
-    # Verify libs are present, get parent object.
-    parent = helper.get_pandevice_parent(module)
-
-    # Object params.
-    spec = {
-        "name": module.params["name"],
-        "interface": module.params["interface"],
-        "local_address_type": module.params["local_address_type"],
-        "local_address_value": module.params["local_address_value"],
-        "peer_address": module.params["peer_address"],
-        "tunnel_interface": module.params["tunnel_interface"],
-        "ttl": module.params["ttl"],
-        "copy_tos": module.params["copy_tos"],
-        "enable_keep_alive": module.params["enable_keep_alive"],
-        "keep_alive_interval": module.params["keep_alive_interval"],
-        "keep_alive_retry": module.params["keep_alive_retry"],
-        "keep_alive_hold_timer": module.params["keep_alive_hold_timer"],
-        "disabled": module.params["disabled"],
-    }
-
-    # Retrieve current info.
-    try:
-        listing = GreTunnel.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Build the object based on the user spec.
-    obj = GreTunnel(**spec)
-    parent.add(obj)
-
-    # Apply the state.
-    changed, diff = helper.apply_state(obj, listing, module)
-
-    # Done.
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

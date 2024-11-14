@@ -28,9 +28,9 @@ ANSIBLE_METADATA = {
 DOCUMENTATION = """
 ---
 module: panos_dynamic_user_group
-short_description: Create dynamic user groups on PAN-OS devices.
+short_description: Manage dynamic user groups on PAN-OS devices.
 description:
-    - Create dynamic user groups on PAN-OS devices.
+    - Manage dynamic user groups on PAN-OS devices.
 author: "Michael Richardson (@mrichardson03)"
 version_added: '2.1.0'
 requirements:
@@ -43,13 +43,13 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     name:
         description:
             - Name of the object.
         type: str
-        required: true
     description:
         description:
             - Description of this object
@@ -67,7 +67,7 @@ options:
 
 EXAMPLES = """
 - name: Create dynamic user group
-  panos_dynamic_user_group:
+  paloaltonetworks.panos.panos_dynamic_user_group:
     provider: '{{ provider }}'
     name: 'Questionable-Users'
     description: 'Questionable Users'
@@ -83,16 +83,6 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.objects import DynamicUserGroup
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.objects import DynamicUserGroup
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
@@ -100,11 +90,13 @@ def main():
         device_group=True,
         min_panos_version=(9, 1, 0),
         with_classic_provider_spec=True,
-        with_state=True,
-        argument_spec=dict(
-            name=dict(type="str", required=True),
-            description=dict(type="str"),
-            filter=dict(type="str"),
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
+        sdk_cls=("objects", "DynamicUserGroup"),
+        sdk_params=dict(
+            name=dict(required=True),
+            description=dict(),
+            filter=dict(),
             tag=dict(type="list", elements="str"),
         ),
     )
@@ -115,25 +107,7 @@ def main():
         supports_check_mode=True,
     )
 
-    parent = helper.get_pandevice_parent(module)
-
-    spec = {
-        "name": module.params["name"],
-        "description": module.params["description"],
-        "filter": module.params["filter"],
-        "tag": module.params["tag"],
-    }
-
-    try:
-        listing = DynamicUserGroup.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    obj = DynamicUserGroup(**spec)
-    parent.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_static_route
-short_description: Create static routes on PAN-OS devices.
+short_description: Manage static routes on PAN-OS devices.
 description:
-    - Create static routes on PAN-OS devices.
+    - Manage static routes on PAN-OS devices.
 author:
     - Michael Richardson (@mrichardson03)
     - Garfield Lee Freeman (@shinmog)
@@ -38,28 +38,27 @@ notes:
     - IPv6 is not supported.
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.full_template_support
 options:
     name:
         description:
             - Name of static route.
         type: str
-        required: true
     destination:
         description:
             - Destination network.  Required if I(state=present).
         type: str
     nexthop_type:
         description:
-            - Type of next hop.
+            - Type of next hop. Defaults to I("ip-address").
         type: str
         choices:
             - ip-address
             - discard
             - none
             - next-vr
-        default: 'ip-address'
     nexthop:
         description:
             - Next hop IP address.  Required if I(state=present).
@@ -82,38 +81,53 @@ options:
         description:
             - The Interface to use.
         type: str
+    enable_path_monitor:
+        description:
+            - Enable path monitor.
+        type: bool
+    failure_condition:
+        description:
+            - Path monitor failure condition.
+        type: str
+        choices:
+            - any
+            - all
+    preemptive_hold_time:
+        description:
+            - Path monitor preemptive hold time in minutes.
+        type: int
 """
 
 EXAMPLES = """
 - name: Create route 'Test-One'
-  panos_static_route:
+  paloaltonetworks.panos.panos_static_route:
     provider: '{{ provider }}'
     name: 'Test-One'
     destination: '1.1.1.0/24'
     nexthop: '10.0.0.1'
 
 - name: Create route 'Test-Two'
-  panos_static_route:
+  paloaltonetworks.panos.panos_static_route:
     provider: '{{ provider }}'
     name: 'Test-Two'
     destination: '2.2.2.0/24'
     nexthop: '10.0.0.1'
 
 - name: Create route 'Test-Three'
-  panos_static_route:
+  paloaltonetworks.panos.panos_static_route:
     provider: '{{ provider }}'
     name: 'Test-Three'
     destination: '3.3.3.0/24'
     nexthop: '10.0.0.1'
 
 - name: Delete route 'Test-Two'
-  panos_static_route:
+  paloaltonetworks.panos.panos_static_route:
     provider: '{{ provider }}'
     name: 'Test-Two'
     state: 'absent'
 
 - name: Create route 'Test-Four'
-  panos_static_route:
+  paloaltonetworks.panos.panos_static_route:
     provider: '{{ provider }}'
     name: 'Test-Four'
     destination: '4.4.4.0/24'
@@ -121,7 +135,7 @@ EXAMPLES = """
     virtual_router: 'VR-Two'
 
 - name: Create route 'Test-Five'
-  panos_static_route:
+  paloaltonetworks.panos.panos_static_route:
     provider: '{{ provider }}'
     name: 'Test-Five'
     destination: '5.5.5.0/24'
@@ -135,38 +149,73 @@ RETURN = """
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos import (
+    ConnectionHelper,
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.network import StaticRoute, VirtualRouter
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.network import StaticRoute, VirtualRouter
-    except ImportError:
-        pass
+
+class Helper(ConnectionHelper):
+    def spec_handling(self, spec, module):
+        if module.params["state"] == "present" and spec["nexthop_type"] is None:
+            # need this because we dont have the default assignment in sdk-params and
+            # `None` value params are being removed in ParamPath.element method (called via VersionedPanObject.element)
+            spec["nexthop_type"] = "ip-address"
+
+        # default to ip-address when nexthop is set in merged state
+        # we dont know if object exists or not in merged state, and we dont set default values in module invocation
+        # in order to avoid unintended updates to non-provided params, but if nexthop is given, type must be ip-address
+        if (
+            module.params["state"] == "merged"
+            and spec["nexthop_type"] is None
+            and spec["nexthop"] is not None
+        ):
+            spec["nexthop_type"] = "ip-address"
+
+        # NOTE merged state have a lot of API issues for updating nexthop we will let the API return it..
+        # from None to IP address - "Failed update nexthop_type: Edit breaks config validity"
+        # from IP address to next-vr - "Failed update nexthop_type: Edit breaks config validity"
+
+        # applies for updating existing routes from IP/next-vr/discard to none
+        # however it works for new objects, we ignore this as this is the existing implementation
+        if module.params["state"] == "merged" and spec["nexthop_type"] == "none":
+            msg = [
+                "Nexthop cannot be set to None with state='merged'.",
+                "You will need to use either state='present' or state='replaced'.",
+            ]
+            module.fail_json(msg=" ".join(msg))
+
+    def object_handling(self, obj, module):
+        super().object_handling(obj, module)
+        if module.params.get("nexthop_type") == "none":
+            setattr(obj, "nexthop_type", None)
 
 
 def main():
     helper = get_connection(
+        helper_cls=Helper,
         template=True,
         template_stack=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
-        argument_spec=dict(
+        parents=(("network", "VirtualRouter", "virtual_router", "default"),),
+        sdk_cls=("network", "StaticRoute"),
+        sdk_params=dict(
             name=dict(required=True),
             destination=dict(),
             nexthop_type=dict(
-                default="ip-address",
                 choices=["ip-address", "discard", "none", "next-vr"],
             ),
             nexthop=dict(),
             admin_dist=dict(),
             metric=dict(type="int", default=10),
-            virtual_router=dict(default="default"),
             interface=dict(),
+            enable_path_monitor=dict(type="bool"),
+            failure_condition=dict(choices=["any", "all"]),
+            preemptive_hold_time=dict(type="int"),
+        ),
+        default_values=dict(
+            nexthop_type="ip-address",
         ),
     )
 
@@ -176,52 +225,7 @@ def main():
         required_one_of=helper.required_one_of,
     )
 
-    spec = {
-        "name": module.params["name"],
-        "destination": module.params["destination"],
-        "nexthop_type": module.params["nexthop_type"],
-        "nexthop": module.params["nexthop"],
-        "interface": module.params["interface"],
-        "admin_dist": module.params["admin_dist"],
-        "metric": module.params["metric"],
-    }
-
-    parent = helper.get_pandevice_parent(module)
-    virtual_router = module.params["virtual_router"]
-
-    # Allow None for nexthop_type.
-    if spec["nexthop_type"] == "none":
-        spec["nexthop_type"] = None
-
-    try:
-        vr_list = VirtualRouter.refreshall(parent, add=False, name_only=True)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed vr refresh: {0}".format(e))
-
-    # Find the virtual router.
-    for vr in vr_list:
-        if vr.name == virtual_router:
-            parent.add(vr)
-            break
-    else:
-        module.fail_json(
-            msg='Virtual router "{0}" does not exist'.format(virtual_router)
-        )
-
-    # Get the listing.
-    try:
-        listing = StaticRoute.refreshall(vr, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Create the object and attach it to the object tree.
-    obj = StaticRoute(**spec)
-    vr.add(obj)
-
-    # Apply the state.
-    changed, diff = helper.apply_state(obj, listing, module)
-
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

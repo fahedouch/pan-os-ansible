@@ -37,7 +37,8 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys_shared
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     snmp_profile:
         description:
@@ -48,7 +49,6 @@ options:
         description:
             - Name of the server.
         type: str
-        required: true
     manager:
         description:
             - IP address or FQDN of SNMP manager to use.
@@ -62,7 +62,7 @@ options:
 EXAMPLES = """
 # Create a snmp v2 server
 - name: Create snmp v2 server
-  panos_snmp_v2c_server:
+  paloaltonetworks.panos.panos_snmp_v2c_server:
     provider: '{{ provider }}'
     snmp_profile: 'my-profile'
     name: 'my-v2c-server'
@@ -79,60 +79,32 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.device import SnmpServerProfile, SnmpV2cServer
-    from panos.errors import PanDeviceError
-except ImportError:
-    try:
-        from pandevice.device import SnmpServerProfile, SnmpV2cServer
-        from pandevice.errors import PanDeviceError
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys_shared=True,
         device_group=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
         min_pandevice_version=(0, 11, 1),
         min_panos_version=(7, 1, 0),
-        argument_spec=dict(
-            snmp_profile=dict(required=True),
+        parents=(("device", "SnmpServerProfile", "snmp_profile"),),
+        sdk_cls=("device", "SnmpV2cServer"),
+        sdk_params=dict(
             name=dict(required=True),
             manager=dict(),
             community=dict(),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # Verify imports, build pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    sp = SnmpServerProfile(module.params["snmp_profile"])
-    parent.add(sp)
-    try:
-        sp.refresh()
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    listing = sp.findall(SnmpV2cServer)
-
-    spec = {
-        "name": module.params["name"],
-        "manager": module.params["manager"],
-        "community": module.params["community"],
-    }
-    obj = SnmpV2cServer(**spec)
-    sp.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    module.exit_json(changed=changed, diff=diff, msg="Done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

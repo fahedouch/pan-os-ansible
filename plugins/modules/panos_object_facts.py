@@ -29,6 +29,10 @@ author:
     - Michael Richardson (@mrichardson03)
     - Garfield Lee Freeman (@shinmog)
 version_added: '1.0.0'
+deprecated:
+    alternative: Use various specific modules such as M(paloaltonetworks.panos.panos_address_object) instead.
+    removed_in: '3.0.0'
+    why: Updating module design  to network resource modules.
 requirements:
     - pan-python can be obtained from PyPI U(https://pypi.python.org/pypi/pan-python)
     - pandevice can be obtained from PyPI U(https://pypi.python.org/pypi/pandevice)
@@ -77,28 +81,28 @@ options:
 
 EXAMPLES = """
 - name: Retrieve address group object 'Prod'
-  panos_object_facts:
+  paloaltonetworks.panos.panos_object_facts:
     provider: '{{ provider }}'
     name: 'Prod'
     object_type: 'address-group'
   register: result
 
 - name: Retrieve service group object 'Prod-Services'
-  panos_object_facts:
+  paloaltonetworks.panos.panos_object_facts:
     provider: '{{ provider }}'
     name: 'Prod-Services'
     object_type: 'service-group'
   register: result
 
 - name: Find all address objects with "Prod" in the name
-  panos_object_facts:
+  paloaltonetworks.panos.panos_object_facts:
     provider: '{{ provider }}'
     name_regex: '.*Prod.*'
     object_type: 'address'
   register: result
 
 - name: Find all static address objects that use addy1
-  panos_object_facts:
+  paloaltonetworks.panos.panos_object_facts:
     provider: '{{ provider }}'
     object_type: 'address-group'
     field: 'static_value'
@@ -252,11 +256,17 @@ def main():
 
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
-        supports_check_mode=False,
+        supports_check_mode=True,
         required_one_of=helper.required_one_of,
         mutually_exclusive=[
             name_params,
         ],
+    )
+
+    module.deprecate(
+        "Deprecated; use object specific modules instead",
+        version="3.0.0",
+        collection_name="paloaltonetworks.panos",
     )
 
     parent = helper.get_pandevice_parent(module)

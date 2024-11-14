@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_template
-short_description: configure Panorama template
+short_description: Manage Panorama template
 description:
-    - Configure Panorama template.
+    - Manage Panorama template.
 author:
     - Garfield Lee Freeman (@shinmog)
 version_added: '2.8.0'
@@ -38,14 +38,14 @@ notes:
     - This is a Panorama only module.
     - Check mode is supported.
 extends_documentation_fragment:
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.provider
 options:
     name:
         description:
             - Name of the template.
         type: str
-        required: true
     description:
         description:
             - The description.
@@ -60,22 +60,26 @@ options:
             - The default vsys in case of a single vsys firewall.
         type: str
         default: vsys1
+    mode:
+        description:
+            - Mode for template.
+        type: str
 """
 
 EXAMPLES = """
 # Create a template.
 - name: Create template
-  panos_template:
+  paloaltonetworks.panos.panos_template:
     provider: '{{ provider }}'
     name: 'hello world'
     description: 'my description here'
     devices:
-      - 0123456
-      - 1123456
+      - 90123456
+      - 91123456
 
 # Delete a template
 - name: Delete a template
-  panos_template:
+  paloaltonetworks.panos.panos_template:
     provider: '{{ provider }}'
     name: 'some template'
     state: 'absent'
@@ -87,78 +91,55 @@ RETURN = """
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos import (
+    ConnectionHelper,
     get_connection,
+    to_sdk_cls,
 )
 
-try:
-    from panos.device import Vsys
-    from panos.errors import PanDeviceError, PanObjectMissing
-    from panos.panorama import Template
-except ImportError:
-    try:
-        from pandevice.device import Vsys
-        from pandevice.errors import PanDeviceError, PanObjectMissing
-        from pandevice.panorama import Template
-    except ImportError:
-        pass
+
+class Helper(ConnectionHelper):
+    def pre_state_handling(self, obj, result, module):
+        # Templates need a vsys child, this only matters if we're creating the
+        # template, otherwise this should work because the sub-config should already
+        # exist.
+        vsys = to_sdk_cls("device", "Vsys")(module.params["default_vsys"])
+        obj.add(vsys)
+
+    def object_handling(self, obj, module):
+        super().object_handling(obj, module)
+        # override 'mode' param sdk default to None if it's not set explicitly in invocation.
+        # SDK has `mode` attribute set to "normal" by default, but there is no xpath for this
+        # resulting in xpath schema error if default is used.
+        if module.params.get("mode") is None:
+            setattr(obj, "mode", None)
 
 
 def main():
     helper = get_connection(
-        with_state=True,
+        helper_cls=Helper,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         firewall_error="This is a Panorama only module",
         min_panos_version=(7, 0, 0),
         min_pandevice_version=(1, 5, 1),
-        argument_spec=dict(
+        with_update_in_apply_state=True,
+        sdk_cls=("panorama", "Template"),
+        sdk_params=dict(
             name=dict(required=True),
             description=dict(),
             devices=dict(type="list", elements="str"),
             default_vsys=dict(default="vsys1"),
+            mode=dict(),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # Verify imports, build pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    # Object params.
-    spec = {
-        "name": module.params["name"],
-        "description": module.params["description"],
-        "devices": module.params["devices"],
-        "default_vsys": module.params["default_vsys"],
-        "mode": None,
-    }
-
-    # Check for current object.
-    live_obj = Template(spec["name"])
-    parent.add(live_obj)
-    try:
-        live_obj.refresh()
-    except PanObjectMissing:
-        live_obj = None
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Build the object and attach to the parent.
-    obj = Template(**spec)
-    parent.add(obj)
-
-    # Templates need a vsys child, this only matters if we're creating the
-    # template, otherwise this should work because the sub-config should already
-    # exist.
-    vsys = Vsys(module.params["default_vsys"])
-    obj.add(vsys)
-
-    # Perform the requeseted action.
-    changed, diff = helper.apply_state_using_update(obj, live_obj, module)
-
-    # Done!
-    module.exit_json(changed=changed, diff=diff, msg="Done!")
+    helper.process(module)
 
 
 if __name__ == "__main__":

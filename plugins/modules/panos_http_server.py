@@ -38,7 +38,8 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys_shared
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     http_profile:
         description:
@@ -49,12 +50,10 @@ options:
         description:
             - Server name.
         type: str
-        required: True
     address:
         description:
             - IP address or FQDN of the HTTP server
         type: str
-        required: True
     protocol:
         description:
             - The protocol.
@@ -74,9 +73,9 @@ options:
             - TLS handshake protocol version
         type: str
         choices:
-            - 1.0
-            - 1.1
-            - 1.2
+            - "1.0"
+            - "1.1"
+            - "1.2"
     certificate_profile:
         description:
             - PAN-OS 9.0+
@@ -99,7 +98,7 @@ options:
 
 EXAMPLES = """
 - name: Create http server
-  panos_http_server:
+  paloaltonetworks.panos.panos_http_server:
     provider: '{{ provider }}'
     http_profile: 'my-profile'
     name: 'my-http-server'
@@ -118,72 +117,38 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.device import HttpServer, HttpServerProfile
-    from panos.errors import PanDeviceError
-except ImportError:
-    try:
-        from pandevice.device import HttpServer, HttpServerProfile
-        from pandevice.errors import PanDeviceError
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys_shared=True,
         device_group=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
         min_pandevice_version=(0, 11, 1),
         min_panos_version=(8, 0, 0),
-        argument_spec=dict(
-            http_profile=dict(required=True),
+        parents=(("device", "HttpServerProfile", "http_profile"),),
+        sdk_cls=("device", "HttpServer"),
+        sdk_params=dict(
             name=dict(required=True),
             address=dict(required=True),
             protocol=dict(default="HTTPS", choices=["HTTP", "HTTPS"]),
-            http_port=dict(type="int", default=443),
+            http_port=dict(type="int", default=443, sdk_param="port"),
             tls_version=dict(choices=["1.0", "1.1", "1.2"]),
             certificate_profile=dict(),
             http_method=dict(default="POST"),
-            http_username=dict(),
-            http_password=dict(no_log=True),
+            http_username=dict(sdk_param="username"),
+            http_password=dict(no_log=True, sdk_param="password"),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # Verify imports, build pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    sp = HttpServerProfile(module.params["http_profile"])
-    parent.add(sp)
-    try:
-        sp.refresh()
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    listing = sp.findall(HttpServer)
-
-    spec = {
-        "name": module.params["name"],
-        "address": module.params["address"],
-        "protocol": module.params["protocol"],
-        "port": module.params["http_port"],
-        "tls_version": module.params["tls_version"],
-        "certificate_profile": module.params["certificate_profile"],
-        "http_method": module.params["http_method"],
-        "username": module.params["http_username"],
-        "password": module.params["http_password"],
-    }
-    obj = HttpServer(**spec)
-    sp.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    module.exit_json(changed=changed, diff=diff, msg="Done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_address_group
-short_description: Create address group objects on PAN-OS devices.
+short_description: Manage address group objects on PAN-OS devices.
 description:
-    - Create address group objects on PAN-OS devices.
+    - Manage address group objects on PAN-OS devices.
 author:
     - Michael Richardson (@mrichardson03)
     - Garfield Lee Freeman (@shinmog)
@@ -39,13 +39,13 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
     - paloaltonetworks.panos.fragments.deprecated_commit
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     name:
         description:
             - Name of address group to create.
-        required: true
         type: str
     static_value:
         description:
@@ -69,21 +69,21 @@ options:
 
 EXAMPLES = """
 - name: Create object group 'Prod'
-  panos_address_group:
+  paloaltonetworks.panos.panos_address_group:
     provider: '{{ provider }}'
     name: 'Prod'
     static_value: ['Test-One', 'Test-Three']
     tag: ['Prod']
 
 - name: Create object group 'SI'
-  panos_address_group:
+  paloaltonetworks.panos.panos_address_group:
     provider: '{{ provider }}'
     name: 'SI'
     dynamic_value: "'SI_Instances'"
     tag: ['SI']
 
 - name: Delete object group 'SI'
-  panos_address_group:
+  paloaltonetworks.panos.panos_address_group:
     provider: '{{ provider }}'
     name: 'SI'
     state: 'absent'
@@ -98,85 +98,32 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.objects import AddressGroup
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.objects import AddressGroup
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys=True,
         device_group=True,
         with_classic_provider_spec=True,
-        with_state=True,
-        argument_spec=dict(
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
+        with_commit=True,
+        sdk_cls=("objects", "AddressGroup"),
+        sdk_params=dict(
             name=dict(type="str", required=True),
             static_value=dict(type="list", elements="str"),
             dynamic_value=dict(),
             description=dict(),
             tag=dict(type="list", elements="str"),
-            commit=dict(type="bool", default=False),
         ),
     )
-    mutually_exclusive = [["static_value", "dynamic_value"]]
 
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         required_one_of=helper.required_one_of,
-        mutually_exclusive=mutually_exclusive,
         supports_check_mode=True,
     )
 
-    # Verify libs are present, get parent object.
-    parent = helper.get_pandevice_parent(module)
-
-    if module.params["state"] == "present":
-        if (
-            module.params["static_value"] is None
-            and module.params["dynamic_value"] is None
-        ):
-            module.fail_json(
-                msg="One of 'static_value' or 'dynamic_value' is required when "
-                "state' is 'present'"
-            )
-
-    # Object params.
-    spec = {
-        "name": module.params["name"],
-        "static_value": module.params["static_value"],
-        "dynamic_value": module.params["dynamic_value"],
-        "description": module.params["description"],
-        "tag": module.params["tag"],
-    }
-
-    # Other info.
-    commit = module.params["commit"]
-
-    # Retrieve current info.
-    try:
-        listing = AddressGroup.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Build the object based on the user spec.
-    obj = AddressGroup(**spec)
-    parent.add(obj)
-
-    # Apply the state.
-    changed, diff = helper.apply_state(obj, listing, module)
-
-    # Commit.
-    if commit and changed:
-        helper.commit(module)
-
-    # Done.
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

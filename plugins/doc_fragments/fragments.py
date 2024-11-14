@@ -158,6 +158,22 @@ notes:
       classic params are ignored.
 """
 
+    NETWORK_RESOURCE_MODULE_STATE = r"""
+options:
+    state:
+        description:
+            - The state.
+        type: str
+        default: present
+        choices:
+            - present
+            - absent
+            - replaced
+            - merged
+            - deleted
+            - gathered
+"""
+
     STATE = r"""
 options:
     state:
@@ -277,11 +293,74 @@ options:
     commit:
         description:
             - B(Deprecated)
-            - Please use M(panos_commit_firewall), M(panos_commit_panorama),
-              M(panos_commit_push) instead.
+            - Please use M(paloaltonetworks.panos.panos_commit_firewall), M(paloaltonetworks.panos.panos_commit_panorama),
+              M(paloaltonetworks.panos.panos_commit_push) instead.
             - HORIZONTALLINE
             - Commit changes after creating object.  If I(ip_address) is a Panorama device, and I(device_group) or
               I(template) are also set, perform a commit to Panorama and a commit-all to the device group/template.
-        default: false
         type: bool
+"""
+
+    UUID = r"""
+options:
+    uuid:
+        description:
+            - The rule UUID.
+            - Note that this is currently more of a read-only field.
+            - Usage of the UUID cannot currently take the place of using the rule name as the primary identifier.
+        type: str
+"""
+
+    MOVEMENT = r"""
+options:
+    location:
+        description:
+            - Position to place the rule in.
+        choices:
+            - top
+            - bottom
+            - before
+            - after
+        type: str
+    existing_rule:
+        description: >
+            - If I(location=before) or I(location=after), this option specifies
+              an existing rule name.  The rule being managed by this module will
+              be positioned relative to the value of this parameter.
+            - Required if I(location=before) or I(location=after).
+        type: str
+"""
+
+    TARGET = r"""
+options:
+    target:
+        description:
+            - Applicable for Panorama only.
+            - Apply this rule exclusively to the listed firewall serial numbers.
+        type: list
+        elements: str
+    negate_target:
+        description:
+            - Applicable for Panorama only.
+            - Negate the value for I(target).
+        type: bool
+"""
+
+    AUDIT_COMMENT = r"""
+options:
+    audit_comment:
+        description:
+            - Add an audit comment to the rule being defined.
+            - This is only applied if there was a change to the rule.
+        type: str
+"""
+
+    GATHERED_FILTER = r"""
+options:
+    gathered_filter:
+        description:
+            - When I(state=gathered).
+            - An advanced filtering option to filter results returned from PAN-OS.
+            - Refer to the guide discussing I(gathered_filter) for more information.
+        type: str
 """

@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_redistribution
-short_description: Configures a Redistribution Profile on a virtual router
+short_description: Manage a Redistribution Profile on a virtual router
 description:
-    - Configures a Redistribution Profile on a virtual router
+    - Manage a Redistribution Profile on a virtual router
 author:
     - Joshua Colson (@freakinhippie)
     - Garfield Lee Freeman (@shinmog)
@@ -37,7 +37,8 @@ notes:
     - Panorama is supported.
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.full_template_support
     - paloaltonetworks.panos.fragments.deprecated_commit
 options:
@@ -45,7 +46,6 @@ options:
         description:
             - Name of rule.
         type: str
-        required: True
     priority:
         description:
             - Priority ID.
@@ -113,14 +113,14 @@ options:
         default: 'ipv4'
     vr_name:
         description:
-            - Name of the virtual router; it must already exist; see M(panos_virtual_router).
+            - Name of the virtual router; it must already exist; see M(paloaltonetworks.panos.panos_virtual_router).
         type: str
         default: 'default'
 """
 
 EXAMPLES = """
 - name: Create Redistribution Profile
-  panos_redistribution:
+  paloaltonetworks.panos.panos_redistribution:
     provider: '{{ provider }}'
     name: 'my-profile'
     priority: 42
@@ -132,55 +132,48 @@ RETURN = """
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos import (
+    ConnectionHelper,
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.network import (
-        RedistributionProfile,
-        RedistributionProfileIPv6,
-        VirtualRouter,
-    )
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.network import (
-            RedistributionProfile,
-            RedistributionProfileIPv6,
-            VirtualRouter,
-        )
-    except ImportError:
-        pass
 
-
-def setup_args():
-    return dict(
-        commit=dict(type="bool", default=False),
-        vr_name=dict(default="default"),
-        type=dict(type="str", default="ipv4", choices=["ipv4", "ipv6"]),
-        name=dict(type="str", required=True),
-        priority=dict(type="int"),
-        action=dict(type="str", default="no-redist", choices=["no-redist", "redist"]),
-        filter_type=dict(type="list", elements="str"),
-        filter_interface=dict(type="list", elements="str"),
-        filter_destination=dict(type="list", elements="str"),
-        filter_nexthop=dict(type="list", elements="str"),
-        ospf_filter_pathtype=dict(type="list", elements="str"),
-        ospf_filter_area=dict(type="list", elements="str"),
-        ospf_filter_tag=dict(type="list", elements="str"),
-        bgp_filter_community=dict(type="list", elements="str"),
-        bgp_filter_extended_community=dict(type="list", elements="str"),
-    )
+class Helper(ConnectionHelper):
+    def spec_handling(self, spec, module):
+        if module.params["type"] == "ipv4":
+            self.sdk_cls = ("network", "RedistributionProfile")
+        else:
+            self.sdk_cls = ("network", "RedistributionProfileIPv6")
 
 
 def main():
     helper = get_connection(
+        helper_cls=Helper,
         template=True,
         template_stack=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
-        argument_spec=setup_args(),
+        with_commit=True,
+        parents=(("network", "VirtualRouter", "vr_name", "default"),),
+        sdk_params=dict(
+            name=dict(type="str", required=True),
+            priority=dict(type="int"),
+            action=dict(
+                type="str", default="no-redist", choices=["no-redist", "redist"]
+            ),
+            filter_type=dict(type="list", elements="str"),
+            filter_interface=dict(type="list", elements="str"),
+            filter_destination=dict(type="list", elements="str"),
+            filter_nexthop=dict(type="list", elements="str"),
+            ospf_filter_pathtype=dict(type="list", elements="str"),
+            ospf_filter_area=dict(type="list", elements="str"),
+            ospf_filter_tag=dict(type="list", elements="str"),
+            bgp_filter_community=dict(type="list", elements="str"),
+            bgp_filter_extended_community=dict(type="list", elements="str"),
+        ),
+        extra_params=dict(
+            type=dict(type="str", default="ipv4", choices=["ipv4", "ipv6"]),
+        ),
     )
 
     module = AnsibleModule(
@@ -189,43 +182,7 @@ def main():
         required_one_of=helper.required_one_of,
     )
 
-    parent = helper.get_pandevice_parent(module)
-
-    vr = VirtualRouter(module.params["vr_name"])
-    parent.add(vr)
-    try:
-        vr.refresh()
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    spec = {
-        "name": module.params["name"],
-        "priority": module.params["priority"],
-        "action": module.params["action"],
-        "filter_type": module.params["filter_type"],
-        "filter_interface": module.params["filter_interface"],
-        "filter_destination": module.params["filter_destination"],
-        "filter_nexthop": module.params["filter_nexthop"],
-        "ospf_filter_pathtype": module.params["ospf_filter_pathtype"],
-        "ospf_filter_area": module.params["ospf_filter_area"],
-        "ospf_filter_tag": module.params["ospf_filter_tag"],
-        "bgp_filter_community": module.params["bgp_filter_community"],
-        "bgp_filter_extended_community": module.params["bgp_filter_extended_community"],
-    }
-
-    if module.params["type"] == "ipv4":
-        obj = RedistributionProfile(**spec)
-    else:
-        obj = RedistributionProfileIPv6(**spec)
-
-    listing = vr.findall(obj.__class__)
-    vr.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    if changed and module.params["commit"]:
-        helper.commit(module)
-
-    module.exit_json(changed=changed, diff=diff, msg="done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

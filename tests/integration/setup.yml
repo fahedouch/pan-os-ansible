@@ -1,5 +1,6 @@
 ---
-- hosts: all
+- name: Setup for testing
+  hosts: all
   connection: local
 
   vars:
@@ -8,12 +9,9 @@
       username: '{{ username | default(omit) }}'
       password: '{{ password | default(omit) }}'
 
-  collections:
-    - paloaltonetworks.panos
-
   tasks:
     - name: Check to see if device is ready
-      panos_op:
+      paloaltonetworks.panos.panos_op:
         provider: '{{ device }}'
         cmd: 'show chassis-ready'
       changed_when: false
@@ -21,9 +19,10 @@
       until: result is not failed and (result.stdout | from_json).response.result == 'yes'
       retries: 5
       delay: 300
+      when: inventory_hostname in groups['firewalls']
 
     - name: Save copy of blank config
-      panos_op:
+      paloaltonetworks.panos.panos_op:
         provider: '{{ device }}'
         cmd: '<save><config><to>blank.xml</to></config></save>'
-        cmd_is_xml: True
+        cmd_is_xml: true

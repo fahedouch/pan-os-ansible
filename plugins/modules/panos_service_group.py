@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_service_group
-short_description: Create service group objects on PAN-OS devices.
+short_description: Manage service group objects on PAN-OS devices.
 description:
-    - Create service group objects on PAN-OS devices.
+    - Manage service group objects on PAN-OS devices.
 author: "Michael Richardson (@mrichardson03)"
 version_added: '1.0.0'
 requirements:
@@ -37,14 +37,14 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.deprecated_commit
 options:
     name:
         description:
             - Name of service group.
         type: str
-        required: true
     value:
         description:
             - List of service objects to be included in the group.  Must specify if state is
@@ -60,13 +60,13 @@ options:
 
 EXAMPLES = """
 - name: Create service group 'Prod-Services'
-  panos_service_group:
+  paloaltonetworks.panos.panos_service_group:
     provider: '{{ provider }}'
     name: 'Prod-Services'
     value: ['ssh-tcp-22', 'mysql-tcp-3306']
 
 - name: Delete service group 'Prod-Services'
-  panos_service_group:
+  paloaltonetworks.panos.panos_service_group:
     provider: '{{ provider }}'
     name: 'Prod-Services'
     state: 'absent'
@@ -81,28 +81,20 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.objects import ServiceGroup
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.objects import ServiceGroup
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys=True,
         device_group=True,
         with_classic_provider_spec=True,
-        with_state=True,
-        argument_spec=dict(
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
+        with_commit=True,
+        sdk_cls=("objects", "ServiceGroup"),
+        sdk_params=dict(
             name=dict(type="str", required=True),
             value=dict(type="list", elements="str"),
             tag=dict(type="list", elements="str"),
-            commit=dict(type="bool", default=False),
         ),
     )
 
@@ -112,38 +104,7 @@ def main():
         supports_check_mode=True,
     )
 
-    # Verify libs are present, get parent object.
-    parent = helper.get_pandevice_parent(module)
-
-    # Object params.
-    spec = {
-        "name": module.params["name"],
-        "value": module.params["value"],
-        "tag": module.params["tag"],
-    }
-
-    # Other info.
-    commit = module.params["commit"]
-
-    # Retrieve current info.
-    try:
-        listing = ServiceGroup.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Build the object based on the user spec.
-    obj = ServiceGroup(**spec)
-    parent.add(obj)
-
-    # Apply the state.
-    changed, diff = helper.apply_state(obj, listing, module)
-
-    # Commit.
-    if commit and changed:
-        helper.commit(module)
-
-    # Done.
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

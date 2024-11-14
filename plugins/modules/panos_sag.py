@@ -28,9 +28,9 @@ description:
 author: "Vinay Venkataraghavan (@vinayvenkat)"
 version_added: '1.0.0'
 deprecated:
-    alternative: Use M(panos_address_group) instead.
+    alternative: Use M(paloaltonetworks.panos.panos_address_group) instead.
     removed_in: '3.0.0'
-    why: This module's functionality is a subset of M(panos_address_group).
+    why: This module's functionality is a subset of M(paloaltonetworks.panos.panos_address_group).
 requirements:
     - pan-python can be obtained from PyPI U(https://pypi.python.org/pypi/pan-python)
     - pandevice can be obtained from PyPI U(https://pypi.python.org/pypi/pandevice)
@@ -84,6 +84,7 @@ options:
         type: list
         elements: str
         required: false
+        default: []
     operation:
         description:
             - The operation to perform Supported values are I(add)/I(list)/I(delete).
@@ -97,20 +98,20 @@ options:
 
 EXAMPLES = """
 - name: sag
-  panos_sag:
+  paloaltonetworks.panos.panos_sag:
     ip_address: "192.168.1.1"
     password: "admin"
     sag_name: "sag-1"
-    static_value: ['test-addresses', ]
+    static_value: ['test-addresses-1', 'test-addresses-2']
     description: "A description for the static address group"
-    tags: ["tags to be associated with the group", ]
+    tags: ["tags to be associated with the group"]
 """
 
 RETURN = """
 # Default return values
 """
 
-from ansible.module_utils.basic import AnsibleModule, get_exception
+from ansible.module_utils.basic import AnsibleModule
 
 try:
     from pandevice import base, firewall, objects, panorama
@@ -181,14 +182,9 @@ def add_address_group(device, dev_group, ag_object):
     else:
         device.add(ag_object)
 
-    exc = None
-    try:
-        ag_object.create()
-    except Exception:
-        exc = get_exception()
-        return False, exc
+    ag_object.create()
 
-    return True, exc
+    return True
 
 
 def get_all_address_group(device):
@@ -197,20 +193,14 @@ def get_all_address_group(device):
     :param device:
     :return:
     """
-    exc = None
-    try:
-        ret = objects.AddressGroup.refreshall(device)
-    except Exception:
-        exc = get_exception()
+    ret = objects.AddressGroup.refreshall(device)
 
-    if exc:
-        return (False, exc)
-    else:
-        sl = []
-        for item in ret:
-            sl.append(item.name)
-        s = ",".join(sl)
-    return s, exc
+    sl = []
+    for item in ret:
+        sl.append(item.name)
+    s = ",".join(sl)
+
+    return s
 
 
 def delete_address_group(device, dev_group, obj_name):
@@ -225,14 +215,10 @@ def delete_address_group(device, dev_group, obj_name):
     # If found, delete it
 
     if static_obj:
-        try:
-            static_obj.delete()
-        except Exception:
-            exc = get_exception()
-            return False, exc
-        return True, None
+        static_obj.delete()
+        return True
     else:
-        return False, None
+        return False
 
 
 def main():
@@ -243,7 +229,7 @@ def main():
         api_key=dict(no_log=True),
         sag_match_filter=dict(type="list", elements="str", required=False),
         sag_name=dict(required=True),
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
         devicegroup=dict(default=None),
         description=dict(default=None),
         tags=dict(type="list", elements="str", default=[]),
@@ -296,33 +282,24 @@ def main():
                 % devicegroup
             )
 
-    if operation == "add":
-        result, exc = add_address_group(device, dev_group, ag_object)
+    result = None
+    try:
+        if operation == "add":
+            result = add_address_group(device, dev_group, ag_object)
 
-        if result and commit:
-            try:
+            if result and commit:
                 device.commit(sync=True)
-            except Exception:
-                exc = get_exception()
-                module.fail_json(msg=exc.message)
-    elif operation == "list":
-        result, exc = get_all_address_group(device)
+        elif operation == "list":
+            result = get_all_address_group(device)
+        elif operation == "delete":
+            obj_name = module.params.get("sag_name", None)
+            result = delete_address_group(device, dev_group, obj_name)
+    except Exception as e:
+        module.fail_json(msg="Failed: {0}".format(e))
 
-        if not exc:
-            module.exit_json(msg=result)
-        else:
-            module.fail_json(msg=exc.message)
-    elif operation == "delete":
-        obj_name = module.params.get("sag_name", None)
-        result, exc = delete_address_group(device, dev_group, obj_name)
-        if not result and exc:
-            module.fail_json(msg=exc.message)
-        elif not result:
-            module.fail_json(msg="Specified object not found.")
-    else:
-        module.fail_json(changed=False, msg="Unsupported option.")
-
-    module.exit_json(changed=True, msg="Address Group Operation Completed.")
+    module.exit_json(
+        changed=True, result=result, msg="Address Group Operation Completed."
+    )
 
 
 if __name__ == "__main__":

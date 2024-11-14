@@ -4,65 +4,158 @@ on:
   push:
     branches:
   pull_request:
+  #schedule:
+  #  - cron: '0 6 * * *'
+
+env:
+  NAMESPACE: paloaltonetworks
+  COLLECTION_NAME: panos
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
 
+  ## Sanity is required:
+  #
+  # https://docs.ansible.com/ansible/latest/dev_guide/testing_sanity.html
+  sanity:
+    name: Sanity (Ⓐ${{ matrix.ansible }})
+    strategy:
+      matrix:
+        include:
+          - ansible: "2.15"
+            python_ver: "3.11"
+          - ansible: "2.16"
+            python_ver: "3.11"
+          - ansible: "2.17"
+            python_ver: "3.11"
+    runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./ansible_collections/paloaltonetworks/panos
-
+        working-directory: ./ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
-          path: ./ansible_collections/paloaltonetworks/panos
+          path: ./ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }}
 
-      - name: Set up Python 3.6.8
-        uses: actions/setup-python@v2.2.2
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.6.8
+          python-version: ${{ matrix.python_ver }}
 
-      - name: Install pipenv
-        run: |
-          pip install pipenv
+      - name: Install Poetry
+        uses: Gr1N/setup-poetry@v8
+        #with:
+        #  poetry-version: 1.0.10
 
-      # - name: Check pipenv cache
-      #   id: cache-pipenv
-      #   uses: actions/cache@v2
-      #   with:
-      #     path: ~/.local/share/virtualenvs
-      #     key: ${{ runner.os }}-pipenv-${{ hashFiles('**/Pipfile.lock') }}
-      #     restore-keys: |
-      #       ${{ runner.os }}-pipenv-
+      # Install the head of the given branch (devel, stable-2.10)
+      - name: Install ansible-base (${{ matrix.ansible }})
+        run: poetry run pip install https://github.com/ansible/ansible/archive/stable-${{ matrix.ansible }}.tar.gz --disable-pip-version-check
+
+      - name: Create lock file
+        run: poetry lock
+
+      #- name: Cache poetry dependencies
+      #  uses: actions/cache@v2
+      #  with:
+      #    #path: ~/.cache/pypoetry/virtualenvs
+      #    #key: ${{ runner.os }}-poetry-${{ hashFiles('poetry.lock') }}
+      #    ##restore-keys: |
+      #    ##  ${{ runner.os }}-poetry-${{ matrix.python-version }}-
+      #    path: ${{ steps.poetry-cache.outputs.dir }}
+      #    key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+      #    restore-keys: |
+      #      ${{ runner.os }}-poetry-
 
       - name: Install dependencies
-        # if: steps.cache-pipenv.outputs.cache-hit != 'true'
-        run: |
-          pipenv install --dev
+        run: poetry install
 
-      - name: Check format
-        run: |
-          pipenv run make check-format
+      - name: Run sanity tests
+        timeout-minutes: 8
+        run: poetry run make new-sanity
 
-      - name: ansible-test sanity
-        run: |
-          pipenv run ansible-test sanity --python 3.6
+  # Ansible-lint is a requirement for certification, and was added to the
+  # certification pipeline 20 June 2023 per Ansible Partner Engineering
+  # communication emails
+  #
+  # Config file is .ansible-lint
+  lint:
+    name: Ansible Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Run ansible-lint
+        uses: ansible/ansible-lint@main
 
-      - name: ansible-galaxy collection build
-        run: |
-          pipenv run make build
+  # Tox is used to execute linters required for Event-Driven Ansible (EDA) code:
+  #   github.com/ansible/eda-partner-testing/blob/main/README.md
+  # Tox should only execute over <root>/extensions/eda/plugins.
+  # Tox utilises the tox.ini file found in the local directory.
+  # This action is taken from Ansible Partner Engineering's example:
+  #   github.com/ansible/eda-partner-testing/blob/main/.github/workflows/tox.yml
+  # Tox is planned by Ansible Partner Engineering to cover other code in future.
+  tox:
+    name: Tox Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: python -m pip install tox
+      - name: Move to tox conf file and run tox
+        run: | 
+          cd .github/workflows
+          python -m tox -- ../..
+
+  pyversion:
+    name: Discover minimum Python version
+    uses: ./.github/workflows/_discover_python_ver.yml
+
+  format:
+    name: Code Format Check
+    runs-on: ubuntu-latest
+    needs: pyversion
+    defaults:
+      run:
+        working-directory: ./ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ./ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ needs.pyversion.outputs.pyversion }}
+
+      - name: Install Poetry
+        uses: Gr1N/setup-poetry@v8
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Do black code format check
+        run: poetry run make check-format
 
   release:
     name: release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test]
+    needs: [sanity, tox, lint, format]
     runs-on: ubuntu-latest
+    outputs:
+      new_release_published: ${{ steps.release.outputs.new_release_published }}
+      new_release_version: ${{ steps.release.outputs.new_release_version }}
+      new_release_git_tag: ${{ steps.release.outputs.new_release_git_tag }}
+
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
+      # This task could be removed once the task below is confirmed working
       - name: Set up Galaxy auth
         run: |
           mkdir -p ~/.ansible
@@ -71,20 +164,37 @@ jobs:
           GALAXY_API_KEY: ${{ secrets.GALAXY_API_KEY }}
         shell: bash
 
+      # New task for combined Galaxy and AutomationHub publishing
+      - name: Set up Automation Hub and Galaxy ansible.cfg file
+        run: |
+          cat << EOF > ansible.cfg
+          [galaxy]
+          server_list = automation_hub, release_galaxy
+          [galaxy_server.automation_hub]
+          url=${{ secrets.AUTOMATION_HUB_URL }}
+          auth_url=${{ secrets.AUTOMATION_HUB_SSO_URL }}
+          token=${{ secrets.AUTOMATION_HUB_API_TOKEN }}
+          [galaxy_server.release_galaxy]
+          url=https://galaxy.ansible.com/
+          token=${{ secrets.GALAXY_API_KEY }}
+          EOF
+        shell: bash
+
       - name: Create release and publish
         id: release
-        uses: cycjimmy/semantic-release-action@v2
+        uses: cycjimmy/semantic-release-action@v4
         with:
           semantic_version: 17.1.1
           extra_plugins: |
             conventional-changelog-conventionalcommits@^4.4.0
+            @semantic-release/changelog@^5.0.1
             @semantic-release/git@^9.0.0
             @semantic-release/exec@^5.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Store built collection
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: collection
           path: |
@@ -93,49 +203,42 @@ jobs:
   docs:
     name: docs
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test]
+    needs: [release, pyversion]
     runs-on: ubuntu-latest
 
     defaults:
       run:
-        working-directory: ./ansible_collections/paloaltonetworks/panos
+        working-directory: ./ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }}
 
     steps:
       # Just a note here:  The Ansible stuff is apparently doing realpath
-      # checks, so trying to simlink stuff and then run Ansible commends
+      # checks, so trying to simlink stuff and then run Ansible commands
       # such as ansible-test in the symlink directory fails.  Thus we need
       # to have the real path contain ansible_collections/paloaltonetworks/panos.
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          path: ./ansible_collections/paloaltonetworks/panos
+          path: ./ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }}
 
-      - name: Set up Python 3.6.8
-        uses: actions/setup-python@v2.2.2
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.6.8
+          python-version: ${{ needs.pyversion.outputs.pyversion }}
 
-      - name: Install pipenv
-        run: |
-          pip install pipenv
+      - name: Install Poetry
+        uses: Gr1N/setup-poetry@v8
 
-      # - name: Check pipenv cache
-      #   id: cache-pipenv
-      #   uses: actions/cache@v2
-      #   with:
-      #     path: ~/.local/share/virtualenvs
-      #     key: ${{ runner.os }}-pipenv-${{ hashFiles('**/Pipfile.lock') }}
-      #     restore-keys: |
-      #       ${{ runner.os }}-pipenv-
+      - name: Add ansible-core
+        run: poetry add ansible-core^2.15
+
+      - name: Add antsibull-docs
+        run: poetry add antsibull-docs^1.11.0
 
       - name: Install dependencies
-        # if: steps.cache-pipenv.outputs.cache-hit != 'true'
-        run: |
-          pipenv install --dev
+        run: poetry install
 
       - name: Build the collection
-        run:
-          ansible-galaxy collection build
+        run: poetry run ansible-galaxy collection build
 
       # - name: Download built collection
       #   uses: actions/download-artifact@v2
@@ -143,27 +246,104 @@ jobs:
       #     name: collection
 
       - name: Install built collection
-        run:
-          ansible-galaxy collection install *.tar.gz
+        run: poetry run ansible-galaxy collection install *.tar.gz
 
       - name: Generate documentation
-        run: |
-          pipenv run make docs
+        run: poetry run make docs
 
       # This is here for right now because the action to deploy seems to assume
-      # (and not have a configuration option to) mirror the actions/checkout@v2
+      # (and not have a configuration option to) mirror the actions/checkout@v4
       # the with.path spec.
       - name: Move the repo to where the deploy action is looking for it
         run: |
           cd ../../../..
           mv pan-os-ansible the_repo
-          mv the_repo/ansible_collections/paloaltonetworks/panos pan-os-ansible
-          mkdir -p pan-os-ansible/ansible_collections/paloaltonetworks/panos
+          mv the_repo/ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }} pan-os-ansible
+          mkdir -p pan-os-ansible/ansible_collections/${{ env.NAMESPACE }}/${{ env.COLLECTION_NAME }}
 
       - name: Deploy to GitHub Pages
-        uses: JamesIves/github-pages-deploy-action@4.1.5
+        uses: JamesIves/github-pages-deploy-action@v4.4.3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: gh-pages
           folder: docs/html
           clean: true
+
+  rc:
+    name: Check rc EE
+    runs-on: ubuntu-latest
+    needs: [sanity, tox, lint, format]
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/develop')
+    outputs:
+      rc: ${{ steps.rc.outputs.new_release_published }}
+      new_release_version: ${{ steps.rc.outputs.new_release_version }}
+
+    steps:
+      - name: checkout code
+        uses: actions/checkout@v4
+
+      - name: setup node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: install dependencies
+        run: |
+          npm install --save-dev semantic-release
+          npm install @semantic-release/commit-analyzer -D
+          npm install conventional-changelog-conventionalcommits -D
+          npm install @semantic-release/changelog -D
+          npm install @semantic-release/git -D
+          npm install @semantic-release/exec -D
+          # npx semantic-release
+          # npm ci
+
+      - name: trick semantic check
+        id: rc
+        run: |
+          # Trick semantic-release into thinking we're not in a CI environment
+          OUTPUT="$(bash -c "unset GITHUB_ACTIONS && unset GITHUB_EVENT_NAME && npx semantic-release --dry-run --no-ci --branches '${GITHUB_REF#refs/heads/}'")"
+          # print output
+          echo "$OUTPUT"
+          # grep with semver regex - \K means to start matching from here in Perl regex
+          NEW_RELEASE_VERSION=$(echo "$OUTPUT" | grep -oP 'The next release version is \K(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?' || echo -n "")
+          echo "new_release_version=$NEW_RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$NEW_RELEASE_VERSION" ]; then
+            echo "new_release_published=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_release_published=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REF: ${{ github.ref }}
+
+      # below does NOT work because semantic-release expects branch name in the config even in dry-run
+      # but we run rc check in non main branches
+      # - name: rc check
+      #   id: rc
+      #   uses: cycjimmy/semantic-release-action@v4
+      #   with:
+      #     dry_run: true
+      #     semantic_version: 17.1.1
+      #     extra_plugins: |
+      #       conventional-changelog-conventionalcommits@^4.4.0
+      #       @semantic-release/changelog@^5.0.1
+      #       @semantic-release/git@^9.0.0
+      #       @semantic-release/exec@^5.0.00
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build_dev_ee:
+    name: dev_ee
+    needs: rc
+    if: needs.rc.outputs.rc == 'true'
+    uses: ./.github/workflows/ee.yml
+
+  build_prod_ee:
+    name: release_ee
+    needs: release
+    uses: ./.github/workflows/ee.yml
+    with:
+      release: true
+      release_tag: ${{ needs.release.outputs.new_release_git_tag }}

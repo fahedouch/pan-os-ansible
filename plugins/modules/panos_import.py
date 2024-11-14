@@ -37,6 +37,9 @@ requirements:
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.full_template_support
+notes:
+    - I(category=certificate) is used for importing a certificate on its own from a file.
+    - I(category=keypair) is used for importing a certificate and private key from a single file.
 options:
     category:
         description:
@@ -98,6 +101,11 @@ options:
         description:
             - Passphrase used to decrypt the certificate and/or private key.
         type: str
+    block_private_key_export:
+        description:
+            - When I(category=keypair), controls if the private key is allowed to be exported from PAN-OS in future.
+            - If this parameter is left undefined, the effective value with be no.
+        type: bool
     custom_logo_location:
         description:
             - When I(category=custom-logo), import this logo file here.
@@ -127,13 +135,13 @@ options:
 
 EXAMPLES = """
 - name: Import software image into PAN-OS
-  panos_import:
+  paloaltonetworks.panos.panos_import:
     provider: '{{ provider }}'
     category: software
-    file: /tmp/PanOS_vm-10.0.1
+    file: /tmp/paloaltonetworks.panos.panos_vm-10.0.1
 
 - name: Import certificate
-  panos_import:
+  paloaltonetworks.panos.panos_import:
     provider: '{{ device }}'
     category: 'certificate'
     certificate_name: 'ISRG Root X1'
@@ -141,39 +149,39 @@ EXAMPLES = """
     filename: '/tmp/isrgrootx1.pem'
 
 - name: Import content
-  panos_import:
+  paloaltonetworks.panos.panos_import:
     provider: '{{ device }}'
     category: 'content'
     filename: '/tmp/panupv2-all-contents-8322-6317'
 
 - name: Import named configuration snapshot
-  panos_import:
+  paloaltonetworks.panos.panos_import:
     provider: '{{ device }}'
     category: 'configuration'
     filename: '/tmp/config.xml'
 
 - name: Import application block page
-  panos_import:
+  paloaltonetworks.panos.panos_import:
     provider: '{{ device }}'
     category: 'application-block-page'
     filename: '/tmp/application-block-page.html'
 
 - name: Import custom logo
-  panos_import:
+  paloaltonetworks.panos.panos_import:
     provider: '{{ device }}'
     category: 'custom-logo'
     custom_logo_location: 'login-screen'
     filename: '/tmp/logo.jpg'
 
 - name: Import SAML metadata profile
-  panos_import:
+  paloaltonetworks.panos.panos_import:
     provider: '{{ device }}'
     category: 'idp-metadata'
     filename: '/tmp/saml_metadata.xml'
     profile_name: 'saml-profile'
 
 - name: Import SAML metadata profile to template
-  panos_import:
+  paloaltonetworks.panos.panos_import:
     provider: '{{ device }}'
     category: 'idp-metadata'
     filename: '/tmp/saml_metadata.xml'
@@ -197,9 +205,7 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
 )
 
 try:
-    import pan.xapi
     import requests
-    import requests_toolbelt
 
     HAS_LIB = True
 except ImportError:
@@ -286,6 +292,7 @@ def main():
             certificate_name=dict(type="str"),
             format=dict(type="str", choices=["pem", "pkcs12"]),
             passphrase=dict(type="str", no_log=True),
+            block_private_key_export=dict(type="bool"),
             custom_logo_location=dict(
                 type="str",
                 choices=[
@@ -334,6 +341,14 @@ def main():
         params["certificate-name"] = module.params["certificate_name"]
         params["format"] = module.params["format"]
         params["passphrase"] = module.params["passphrase"]
+        src = "block_private_key_export"
+        dst = "block-private-key"
+        if module.params[src] is None:
+            params[dst] = None
+        elif module.params[src]:
+            params[dst] = "yes"
+        else:
+            params[dst] = "no"
 
     elif category == "custom-logo":
         params["where"] = module.params["custom_logo_location"]

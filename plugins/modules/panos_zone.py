@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_zone
-short_description: configure security zone
+short_description: Manage security zone
 description:
-    - Configure security zones on PAN-OS firewall or in Panorama template.
+    - Manage security zones on PAN-OS firewall or in Panorama template.
 author:
     - Robert Hagen (@stealthllama)
     - Garfield Lee Freeman (@shinmog)
@@ -38,7 +38,8 @@ notes:
     - Check mode is supported.
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
     - paloaltonetworks.panos.fragments.full_template_support
     - paloaltonetworks.panos.fragments.vsys
 options:
@@ -46,7 +47,6 @@ options:
         description:
             - Name of the security zone to configure.
         type: str
-        required: true
     mode:
         description:
             - The mode of the security zone. Must match the mode of the interface.
@@ -91,7 +91,7 @@ options:
 EXAMPLES = """
 # Create an L3 zone.
 - name: create DMZ zone on a firewall
-  panos_zone:
+  paloaltonetworks.panos.panos_zone:
     provider: '{{ provider }}'
     zone: 'dmz'
     mode: 'layer3'
@@ -99,7 +99,7 @@ EXAMPLES = """
 
 # Add an interface to the zone.
 - name: add ethernet1/2 to zone dmz
-  panos_interface:
+  paloaltonetworks.panos.panos_interface:
     provider: '{{ provider }}'
     zone: 'dmz'
     mode: 'layer3'
@@ -108,14 +108,14 @@ EXAMPLES = """
 
 # Delete the zone.
 - name: delete the DMZ zone
-  panos_interface:
+  paloaltonetworks.panos.panos_interface:
     provider: '{{ provider }}'
     zone: 'dmz'
     state: 'absent'
 
 # Add a zone to a multi-VSYS Panorama template
 - name: add Cloud zone to template
-  panos_interface:
+  paloaltonetworks.panos.panos_interface:
     provider: '{{ provider }}'
     template: 'Datacenter Template'
     vsys: 'vsys4'
@@ -134,26 +134,18 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.network import Zone
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.network import Zone
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys=True,
         template=True,
         template_stack=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
-        argument_spec=dict(
-            zone=dict(required=True),
+        sdk_cls=("network", "Zone"),
+        sdk_params=dict(
+            zone=dict(required=True, sdk_param="name"),
             mode=dict(
                 choices=["tap", "virtual-wire", "layer2", "layer3", "external"],
                 default="layer3",
@@ -161,47 +153,21 @@ def main():
             interface=dict(type="list", elements="str"),
             zone_profile=dict(),
             log_setting=dict(),
-            enable_userid=dict(type="bool", default=False),
+            enable_userid=dict(
+                type="bool", default=False, sdk_param="enable_user_identification"
+            ),
             include_acl=dict(type="list", elements="str"),
             exclude_acl=dict(type="list", elements="str"),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # Verify imports, build pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    # Set the Zone object params
-    zone_spec = {
-        "name": module.params["zone"],
-        "mode": module.params["mode"],
-        "interface": module.params["interface"],
-        "zone_profile": module.params["zone_profile"],
-        "log_setting": module.params["log_setting"],
-        "enable_user_identification": module.params["enable_userid"],
-        "include_acl": module.params["include_acl"],
-        "exclude_acl": module.params["exclude_acl"],
-    }
-
-    # Retrieve the current list of zones
-    try:
-        zones = Zone.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Build the zone and attach to the parent
-    new_zone = Zone(**zone_spec)
-    parent.add(new_zone)
-
-    # Perform the requeseted action.
-    changed, diff = helper.apply_state(new_zone, zones, module)
-
-    # Done!
-    module.exit_json(changed=changed, diff=diff, msg="Done!")
+    helper.process(module)
 
 
 if __name__ == "__main__":

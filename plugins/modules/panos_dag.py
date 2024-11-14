@@ -22,15 +22,15 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_dag
-short_description: create a dynamic address group
+short_description: Manage a dynamic address group
 description:
-    - Create a dynamic address group object in the firewall used for policy rules
+    - Manage a dynamic address group object in the firewall used for policy rules
 author: "Luigi Mori (@jtschichold), Ivan Bojer (@ivanbojer), Vinay Venkataraghavan (@vinayvenkat)"
 version_added: '1.0.0'
 deprecated:
-    alternative: Use M(panos_address_group) instead.
+    alternative: Use M(paloaltonetworks.panos.panos_address_group) instead.
     removed_in: '3.0.0'
-    why: This module's functionality is a subset of M(panos_address_group).
+    why: This module's functionality is a subset of M(paloaltonetworks.panos.panos_address_group).
 requirements:
     - pan-python can be obtained from PyPI U(https://pypi.python.org/pypi/pan-python)
     - pandevice can be obtained from PyPI U(https://pypi.python.org/pypi/pandevice)
@@ -92,8 +92,6 @@ options:
         description:
             - commit if changed
         type: bool
-        required: false
-        default: false
     description:
         description:
             - The description of the object.
@@ -102,7 +100,7 @@ options:
 
 EXAMPLES = """
 - name: Create dag
-  panos_dag:
+  paloaltonetworks.panos.panos_dag:
     ip_address: "192.168.1.1"
     password: "admin"
     dag_name: "dag-1"
@@ -115,7 +113,7 @@ RETURN = """
 # Default return values
 """
 
-from ansible.module_utils.basic import AnsibleModule, get_exception
+from ansible.module_utils.basic import AnsibleModule
 
 try:
     from pan.xapi import PanXapiError
@@ -172,20 +170,13 @@ def get_all_address_group(device):
     :param device:
     :return:
     """
-    exc = None
-    try:
-        ret = objects.AddressGroup.refreshall(device)
-    except Exception:
-        exc = get_exception()
+    ret = objects.AddressGroup.refreshall(device)
 
-    if exc:
-        return (False, exc)
-    else:
-        sl = []
-        for item in ret:
-            sl.append(item.name)
-        s = ",".join(sl)
-        return (s, exc)
+    sl = []
+    for item in ret:
+        sl.append(item.name)
+    s = ",".join(sl)
+    return s
 
 
 def delete_address_group(device, group_name):
@@ -196,20 +187,13 @@ def delete_address_group(device, group_name):
     :param group_name:
     :return:
     """
+    ret = objects.AddressGroup.refreshall(device)
 
-    exc = None
-    try:
-        ret = objects.AddressGroup.refreshall(device)
-    except Exception:
-        exc = get_exception()
+    for ag in ret:
+        if ag.name == group_name:
+            ag.delete()
 
-    if exc:
-        return (False, exc)
-    else:
-        for ag in ret:
-            if ag.name == group_name:
-                ag.delete()
-        return (True, None)
+    return True
 
 
 def main():
@@ -222,7 +206,7 @@ def main():
         dag_match_filter=dict(type="str", default=None),
         dag_name=dict(required=True),
         tag_name=dict(type="list", elements="str", required=False),
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
         devicegroup=dict(default=None),
         description=dict(default=None),
         operation=dict(type="str", required=True, choices=["add", "list", "delete"]),
@@ -234,7 +218,7 @@ def main():
     )
 
     module.deprecate(
-        "This module has been deprecated; use panos_address_group",
+        "This module has been deprecated; use paloaltonetworks.panos.panos_address_group",
         version="3.0.0",
         collection_name="paloaltonetworks.panos",
     )
@@ -274,21 +258,23 @@ def main():
     """
 
     result = None
-    if operation == "add":
-        result = add_address_group(device, dev_group, ag_object)
-    elif operation == "list":
-        result, exc = get_all_address_group(device)
-    elif operation == "delete":
-        result, exc = delete_address_group(
-            device, group_name=module.params.get("dag_name", None)
-        )
+    try:
+        if operation == "add":
+            result = add_address_group(device, dev_group, ag_object)
+        elif operation == "list":
+            result = get_all_address_group(device)
+        elif operation == "delete":
+            result = delete_address_group(
+                device, group_name=module.params.get("dag_name", None)
+            )
+    except Exception as e:
+        module.fail_json(msg="Failed: {0}".format(e))
 
     if result and commit:
         try:
             device.commit(sync=True)
-        except PanXapiError:
-            exc = get_exception()
-            module.fail_json(msg=exc.message)
+        except PanXapiError as e:
+            module.fail_json(msg="Failed commit: {0}".format(e))
 
     module.exit_json(changed=True, msg=result)
 

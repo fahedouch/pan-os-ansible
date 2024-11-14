@@ -37,7 +37,8 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys_shared
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     syslog_profile:
         description:
@@ -48,12 +49,10 @@ options:
         description:
             - Server name.
         type: str
-        required: True
     server:
         description:
             - IP address or FQDN of the syslog server
         type: str
-        required: True
     transport:
         description:
             - Syslog transport.
@@ -94,7 +93,7 @@ options:
 
 EXAMPLES = """
 - name: Create syslog server
-  panos_syslog_server:
+  paloaltonetworks.panos.panos_syslog_server:
     provider: '{{ provider }}'
     syslog_profile: 'my-profile'
     name: 'my-syslog-server'
@@ -111,31 +110,23 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.device import SyslogServer, SyslogServerProfile
-    from panos.errors import PanDeviceError
-except ImportError:
-    try:
-        from pandevice.device import SyslogServer, SyslogServerProfile
-        from pandevice.errors import PanDeviceError
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys_shared=True,
         device_group=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
         min_pandevice_version=(0, 11, 1),
         min_panos_version=(7, 1, 0),
-        argument_spec=dict(
-            syslog_profile=dict(required=True),
+        parents=(("device", "SyslogServerProfile", "syslog_profile"),),
+        sdk_cls=("device", "SyslogServer"),
+        sdk_params=dict(
             name=dict(required=True),
-            server=dict(required=True),
+            server=dict(),
             transport=dict(default="UDP", choices=["UDP", "TCP", "SSL"]),
-            syslog_port=dict(type="int"),
+            syslog_port=dict(type="int", sdk_param="port"),
             format=dict(default="BSD", choices=["BSD", "IETF"]),
             facility=dict(
                 default="LOG_USER",
@@ -153,37 +144,14 @@ def main():
             ),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # Verify imports, build pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    sp = SyslogServerProfile(module.params["syslog_profile"])
-    parent.add(sp)
-    try:
-        sp.refresh()
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    listing = sp.findall(SyslogServer)
-
-    spec = {
-        "name": module.params["name"],
-        "server": module.params["server"],
-        "transport": module.params["transport"],
-        "port": module.params["syslog_port"],
-        "format": module.params["format"],
-        "facility": module.params["facility"],
-    }
-    obj = SyslogServer(**spec)
-    sp.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    module.exit_json(changed=changed, diff=diff, msg="Done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_bgp_conditional_advertisement
-short_description: Configures a BGP conditional advertisement.
+short_description: Manage a BGP conditional advertisement.
 description:
     - Use BGP to publish and consume routes from disparate networks.
     - In the PAN-OS GUI, this resource cannot be created without also creating at least
@@ -54,22 +54,22 @@ options:
     vr_name:
         description:
             - Name of the virtual router; it must already exist and have BGP configured.
-            - See M(panos_virtual_router).
+            - See M(paloaltonetworks.panos.panos_virtual_router).
         type: str
         default: default
     advertise_filter:
         description:
             - B(Deprecated)
-            - Use M(panos_bgp_policy_filter) to define filters after creation.
+            - Use M(paloaltonetworks.panos.panos_bgp_policy_filter) to define filters after creation.
             - HORIZONTALLINE
-            - Advertisement filter object returned by M(panos_bgp_policy_filter).
+            - Advertisement filter object returned by M(paloaltonetworks.panos.panos_bgp_policy_filter).
         type: str
     non_exist_filter:
         description:
             - B(Deprecated)
-            - Use M(panos_bgp_policy_filter) to define filters after creation.
+            - Use M(paloaltonetworks.panos.panos_bgp_policy_filter) to define filters after creation.
             - HORIZONTALLINE
-            - Non-Exist filter object returned by M(panos_bgp_policy_filter).
+            - Non-Exist filter object returned by M(paloaltonetworks.panos.panos_bgp_policy_filter).
         type: str
     enable:
         description:
@@ -89,7 +89,7 @@ options:
 
 EXAMPLES = """
 - name: Create BGP Conditional Advertisement Rule
-  panos_bgp_conditional_advertisement:
+  paloaltonetworks.panos.panos_bgp_conditional_advertisement:
     provider: '{{ provider }}'
     name: 'cond-rule-01'
     enable: true
@@ -126,7 +126,7 @@ from base64 import b64decode
 
 def setup_args():
     return dict(
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
         vr_name=dict(default="default"),
         non_exist_filter=dict(type="str"),
         advertise_filter=dict(type="str"),
@@ -188,11 +188,12 @@ def main():
             filter_obj = pickle.loads(b64decode(val))
             obj.add(filter_obj)
 
-    changed, diff = helper.apply_state(obj, listing, module)
-    if changed and module.params["commit"]:
+    resp = helper.apply_state(obj, listing, module)
+    if resp["changed"] and module.params["commit"]:
         helper.commit(module)
 
-    module.exit_json(changed=changed, diff=diff, msg="done")
+    resp["msg"] = "done"
+    module.exit_json(**resp)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,10 @@ author:
     - 'Garfield Lee Freeman (@shinmog)'
     - 'Michael Richardson (@mrichardson03)'
 version_added: '1.0.0'
+deprecated:
+    alternative: Use M(paloaltonetworks.panos.panos_security_rule) with I(state=gathered).
+    removed_in: '3.0.0'
+    why: Updating module design to network resource modules.
 requirements:
     - pan-python
     - pandevice
@@ -105,7 +109,7 @@ options:
 
 EXAMPLES = """
 - name: Get a list of all security rules
-  panos_security_rule_facts:
+  paloaltonetworks.panos.panos_security_rule_facts:
     provider: '{{ provider }}'
   register: sec_rules
 
@@ -113,17 +117,17 @@ EXAMPLES = """
     msg: '{{ sec_rules.rule_names }}'
 
 - name: Get the definition for rule 'HTTP Multimedia'
-  panos_security_rule_facts:
+  paloaltonetworks.panos.panos_security_rule_facts:
     provider: '{{ provider }}'
     names:
-        - 'HTTP Multimedia'
+      - 'HTTP Multimedia'
   register: rule1
 
 - debug:
     msg: '{{ rule1.spec }}'
 
 - name: Get rule names matching DNS traffic
-  panos_security_rule_facts:
+  paloaltonetworks.panos.panos_security_rule_facts:
     provider: '{{ provider }}'
     match_rules:
       source_zone: 'trust'
@@ -327,6 +331,17 @@ def main():
         rulebase=True,
         with_classic_provider_spec=True,
         error_on_firewall_shared=True,
+        ansible_to_sdk_param_mapping={
+            "rule_name": "name",
+            "source_zone": "fromzone",
+            "source_ip": "source",
+            "destination_zone": "tozone",
+            "destination_ip": "destination",
+            "rule_type": "type",
+            "tag_name": "tag",
+            "group_profile": "group",
+            "antivirus": "virus",
+        },
         argument_spec=dict(
             rule_name=dict(),
             names=dict(type="list", elements="str"),
@@ -353,23 +368,17 @@ def main():
 
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
-        supports_check_mode=False,
+        supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    parent = helper.get_pandevice_parent(module)
-
-    renames = (
-        ("name", "rule_name"),
-        ("fromzone", "source_zone"),
-        ("tozone", "destination_zone"),
-        ("source", "source_ip"),
-        ("destination", "destination_ip"),
-        ("type", "rule_type"),
-        ("tag", "tag_name"),
-        ("group", "group_profile"),
-        ("virus", "antivirus"),
+    module.deprecate(
+        "Deprecated; use panos_security_rule with state=gathered instead",
+        version="3.0.0",
+        collection_name="paloaltonetworks.panos",
     )
+
+    parent = helper.get_pandevice_parent(module)
 
     names = module.params["names"]
     details = module.params["details"]
@@ -403,14 +412,14 @@ def main():
         module.exit_json(changed=False, rule_names=names)
 
     else:
+        rules = []
+
         # Return full policy details.  Will return full policy details even if
         # details is False if specific rules are given, because returning the
         # user's list of rules back to them is pointless.
         if names is None:
-            listing = SecurityRule.refreshall(parent)
-            rules = [rule.about() for rule in listing]
+            rules = SecurityRule.refreshall(parent)
         else:
-            rules = []
             for name in names:
                 rule = SecurityRule(name)
                 parent.add(rule)
@@ -420,15 +429,9 @@ def main():
                 except PanDeviceError as e:
                     module.fail_json(msg="Failed refresh: {0}".format(e))
 
-                rules.append(rule.about())
+                rules.append(rule)
 
-        # Fix up names in returned dict.
-        for rule in rules:
-            for p, a in renames:
-                rule[a] = rule[p]
-                del rule[p]
-
-        module.exit_json(changed=False, rule_details=rules)
+        module.exit_json(changed=False, rule_details=helper.describe(rules))
 
 
 if __name__ == "__main__":

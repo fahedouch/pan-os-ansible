@@ -38,13 +38,13 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys_shared
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     name:
         description:
             - Name of the profile.
         type: str
-        required: true
     tag_registration:
         description:
             - The server should have user-ID agent running in order for tag
@@ -224,15 +224,65 @@ options:
             - PAN-OS 9.0+.
             - Payload for custom config format.
         type: str
+    globalprotect_name:
+        description:
+            - PAN-OS 9.1+.
+            - Name for custom GlobalProtect format.
+        type: str
+    globalprotect_uri_format:
+        description:
+            - PAN-OS 9.1+.
+            - URI format for custom GlobalProtect format.
+        type: str
+    globalprotect_payload:
+        description:
+            - PAN-OS 9.1+.
+            - Payload for custom GlobalProtect format.
+        type: str
+    decryption_name:
+        description:
+            - PAN-OS 10.0+.
+            - Name for custom decryption format.
+        type: str
+    decryption_uri_format:
+        description:
+            - PAN-OS 10.0+.
+            - URI format for custom decryption format.
+        type: str
+    decryption_payload:
+        description:
+            - PAN-OS 10.0+.
+            - Payload for custom decryption format.
+        type: str
 """
 
 EXAMPLES = """
 # Create a profile
-- name: Create http profile
-  panos_http_profile:
+- name: Create http profile with tag registration
+  paloaltonetworks.panos.panos_http_profile:
     provider: '{{ provider }}'
     name: 'my-profile'
     tag_registration: true
+
+# Create a profile with log forwarding
+- name: Create http profile for traffic log forwarding
+  paloaltonetworks.panos.panos_http_profile:
+    provider: '{{ provider }}'
+    name: 'my-profile'
+    traffic_name: 'traffic-logs-exporter'
+    traffic_uri_format: 'https://test.local'
+    traffic_payload: >
+        {
+            "category": "network",
+            "action": "$action",
+            "app": "$app",
+            "dst": "$dst",
+            "src": "$src",
+            "receive_time": "$receive_time",
+            "rule": "$rule",
+            "rule_uuid": "$rule_uuid",
+            "sessionid": "$sessionid",
+        }
 """
 
 RETURN = """
@@ -244,26 +294,18 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.device import HttpServerProfile
-    from panos.errors import PanDeviceError
-except ImportError:
-    try:
-        from pandevice.device import HttpServerProfile
-        from pandevice.errors import PanDeviceError
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys_shared=True,
         device_group=True,
-        with_state=True,
+        with_network_resource_module_state=True,
+        with_gathered_filter=True,
         with_classic_provider_spec=True,
-        min_pandevice_version=(0, 11, 1),
+        min_pandevice_version=(1, 10, 0),
         min_panos_version=(8, 0, 0),
-        argument_spec=dict(
+        sdk_cls=("device", "HttpServerProfile"),
+        sdk_params=dict(
             name=dict(required=True),
             tag_registration=dict(type="bool"),
             config_name=dict(),
@@ -308,73 +350,22 @@ def main():
             iptag_name=dict(),
             iptag_uri_format=dict(),
             iptag_payload=dict(),
+            globalprotect_name=dict(),
+            globalprotect_uri_format=dict(),
+            globalprotect_payload=dict(),
+            decryption_name=dict(),
+            decryption_uri_format=dict(),
+            decryption_payload=dict(),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
         supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    # Verify imports, build pandevice object tree.
-    parent = helper.get_pandevice_parent(module)
-
-    try:
-        listing = HttpServerProfile.refreshall(parent)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    spec = {
-        "name": module.params["name"],
-        "tag_registration": module.params["tag_registration"],
-        "config_name": module.params["config_name"],
-        "config_uri_format": module.params["config_uri_format"],
-        "config_payload": module.params["config_payload"],
-        "system_name": module.params["system_name"],
-        "system_uri_format": module.params["system_uri_format"],
-        "system_payload": module.params["system_payload"],
-        "threat_name": module.params["threat_name"],
-        "threat_uri_format": module.params["threat_uri_format"],
-        "threat_payload": module.params["threat_payload"],
-        "traffic_name": module.params["traffic_name"],
-        "traffic_uri_format": module.params["traffic_uri_format"],
-        "traffic_payload": module.params["traffic_payload"],
-        "hip_match_name": module.params["hip_match_name"],
-        "hip_match_uri_format": module.params["hip_match_uri_format"],
-        "hip_match_payload": module.params["hip_match_payload"],
-        "url_name": module.params["url_name"],
-        "url_uri_format": module.params["url_uri_format"],
-        "url_payload": module.params["url_payload"],
-        "data_name": module.params["data_name"],
-        "data_uri_format": module.params["data_uri_format"],
-        "data_payload": module.params["data_payload"],
-        "wildfire_name": module.params["wildfire_name"],
-        "wildfire_uri_format": module.params["wildfire_uri_format"],
-        "wildfire_payload": module.params["wildfire_payload"],
-        "tunnel_name": module.params["tunnel_name"],
-        "tunnel_uri_format": module.params["tunnel_uri_format"],
-        "tunnel_payload": module.params["tunnel_payload"],
-        "user_id_name": module.params["user_id_name"],
-        "user_id_uri_format": module.params["user_id_uri_format"],
-        "user_id_payload": module.params["user_id_payload"],
-        "gtp_name": module.params["gtp_name"],
-        "gtp_uri_format": module.params["gtp_uri_format"],
-        "gtp_payload": module.params["gtp_payload"],
-        "auth_name": module.params["auth_name"],
-        "auth_uri_format": module.params["auth_uri_format"],
-        "auth_payload": module.params["auth_payload"],
-        "sctp_name": module.params["sctp_name"],
-        "sctp_uri_format": module.params["sctp_uri_format"],
-        "sctp_payload": module.params["sctp_payload"],
-        "iptag_name": module.params["iptag_name"],
-        "iptag_uri_format": module.params["iptag_uri_format"],
-        "iptag_payload": module.params["iptag_payload"],
-    }
-    obj = HttpServerProfile(**spec)
-    parent.add(obj)
-
-    changed, diff = helper.apply_state(obj, listing, module)
-    module.exit_json(changed=changed, diff=diff, msg="Done")
+    helper.process(module)
 
 
 if __name__ == "__main__":

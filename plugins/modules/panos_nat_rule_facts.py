@@ -27,6 +27,10 @@ description:
     - Get information about one or more NAT rules.
 author: "Garfield Lee Freeman (@shinmog)"
 version_added: '1.0.0'
+deprecated:
+    alternative: Use M(paloaltonetworks.panos.panos_nat_rule2) with I(state=gathered).
+    removed_in: '3.0.0'
+    why: Updating module design to network resource modules.
 requirements:
     - pan-python
     - pandevice
@@ -63,7 +67,7 @@ options:
 
 EXAMPLES = """
 - name: Get a list of all NAT rules
-  panos_nat_rule_facts:
+  paloaltonetworks.panos.panos_nat_rule_facts:
     provider: '{{ provider }}'
     listing: true
   register: res1
@@ -72,7 +76,7 @@ EXAMPLES = """
     msg: '{{ res1.listing }}'
 
 - name: Get the NAT rule foo
-  panos_nat_rule_facts:
+  paloaltonetworks.panos.panos_nat_rule_facts:
     provider: '{{ provider }}'
     rule_name: 'foo'
   register: res2
@@ -182,6 +186,23 @@ def main():
         required_one_of=[
             ["listing", "rule_name", "rule_regex", "uuid"],
         ],
+        ansible_to_sdk_param_mapping={
+            "rule_name": "name",
+            "source_zone": "fromzone",
+            "destination_zone": "tozone",
+            "source_ip": "source",
+            "destination_ip": "destination",
+            "snat_type": "source_translation_type",
+            "snat_static_address": "source_translation_static_translated_address",
+            "snat_bidirectional": "source_translation_static_bi_directional",
+            "snat_address_type": "source_translation_address_type",
+            "snat_interface": "source_translation_interface",
+            "snat_interface_address": "source_translation_ip_address",
+            "snat_dynamic_address": "source_translation_translated_addresses",
+            "dnat_address": "destination_translated_address",
+            "dnat_port": "destination_translated_port",
+            "tag_val": "tag",
+        },
         argument_spec=dict(
             listing=dict(type="bool"),
             rule_name=dict(),
@@ -192,29 +213,17 @@ def main():
 
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
-        supports_check_mode=False,
+        supports_check_mode=True,
         required_one_of=helper.required_one_of,
     )
 
-    parent = helper.get_pandevice_parent(module)
-
-    renames = (
-        ("name", "rule_name"),
-        ("fromzone", "source_zone"),
-        ("tozone", "destination_zone"),
-        ("source", "source_ip"),
-        ("destination", "destination_ip"),
-        ("source_translation_type", "snat_type"),
-        ("source_translation_static_translated_address", "snat_static_address"),
-        ("source_translation_static_bi_directional", "snat_bidirectional"),
-        ("source_translation_address_type", "snat_address_type"),
-        ("source_translation_interface", "snat_interface"),
-        ("source_translation_ip_address", "snat_interface_address"),
-        ("source_translation_translated_addresses", "snat_dynamic_address"),
-        ("destination_translated_address", "dnat_address"),
-        ("destination_translated_port", "dnat_port"),
-        ("tag", "tag_val"),
+    module.deprecate(
+        "Deprecated; use panos_nat_rule2 with state=gathered instead",
+        version="3.0.0",
+        collection_name="paloaltonetworks.panos",
     )
+
+    parent = helper.get_pandevice_parent(module)
 
     if module.params["rule_name"]:
         obj = NatRule(module.params["rule_name"])
@@ -226,7 +235,7 @@ def main():
 
         module.exit_json(
             changed=False,
-            object=helper.to_module_dict(obj, renames),
+            object=helper.describe(obj),
         )
 
     try:
@@ -239,7 +248,7 @@ def main():
             if x.uuid == module.params["uuid"]:
                 module.exit_json(
                     changed=False,
-                    object=helper.to_module_dict(x, renames),
+                    object=helper.describe(x),
                 )
         module.fail_json(msg='No rule with uuid "{0}"'.format(module.params["uuid"]))
 
@@ -252,12 +261,12 @@ def main():
             module.fail_json(msg="Invalid regex: {0}".format(e))
 
     ans = [
-        helper.to_module_dict(x, renames)
+        x
         for x in listing
         if module.params["listing"] or matcher.search(x.uid) is not None
     ]
 
-    module.exit_json(changed=False, listing=ans)
+    module.exit_json(changed=False, listing=helper.describe(ans))
 
 
 if __name__ == "__main__":

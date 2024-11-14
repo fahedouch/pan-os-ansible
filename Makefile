@@ -27,29 +27,14 @@ help:
 	@echo Available targets:
 	@fgrep "##" $(MAKEFILE_LIST) | fgrep -v fgrep | sort
 
-.PHONY: tests
-tests:	check-format sanity
-
-.PHONY: sanity
-sanity:		## Run sanity tests
-	# import is broken on macOS.
-	ansible-test sanity --python $(python_version) --skip-test import
-
-.PHONY: units
-units:		## Run unit tests
-	./fix-pytest-ini.py
-	-ansible-test coverage erase # On first run, there is nothing to erase.
-	ansible-test units --python $(python_version) --coverage
-	ansible-test coverage html
-
-.PHONY: integration
-integration:	## Run integration tests
-	$(MAKE) -C tests/integration $(CI)
-
 .PHONY: docs
 docs:		## Build collection documentation
+	mkdir antsibull
+	poetry run antsibull-docs collection --use-current --dest-dir antsibull --no-indexes collections paloaltonetworks.panos
 	mkdir -p docs/source/modules
-	cd docs && ansible-doc-extractor --template templates/module.rst.j2 source/modules ~/.ansible/collections/ansible_collections/paloaltonetworks/panos/plugins/modules/panos*.py
+	mv antsibull/collections/paloaltonetworks/panos/* docs/source/modules
+	rm -rf antsibull
+	rm -f docs/source/modules/index.rst
 	cd docs && sphinx-build source html
 
 .PHONY: clean
@@ -57,20 +42,22 @@ clean:		## Remove all auto-generated files
 	rm -rf tests/output
 	rm -rf *.tar.gz
 
-build:		## Build collection
-	ansible-galaxy collection build
-
-format:		## Format with black, isort
+.PHONY: format
+format:		## Format with black
 	black .
-	isort .
 
-check-format:	## Check with black, isort
-	black --check .
-	isort --diff .
-	isort --check .
+.PHONY: check-format
+check-format:	## Check with black
+	black --check --diff .
 
-sync-deps:	## Sync Pipfile.lock to requirements.txt
-	pipenv lock --requirements > requirements.txt
+.PHONY: old-sanity
+old-sanity:		## Sanity tests for Ansible v2.9 and Ansible v2.10
+	ansible-test sanity -v --skip-test pylint --skip-test rstcheck --python $(python_version)
 
-test-release:	## Semantic release dry run
-	semantic-release --dry-run --no-ci --branches=develop
+.PHONY: new-sanity
+new-sanity:		## Sanity tests for Ansible v2.11 and above
+	ansible-test sanity -v --python $(python_version)
+
+.PHONY: reqs
+reqs:       ## Recreate the requirements.txt file
+	poetry export -f requirements.txt --output requirements.txt --only=main --without-hashes

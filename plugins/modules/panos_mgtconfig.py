@@ -36,6 +36,7 @@ notes:
 extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.deprecated_commit
+    - paloaltonetworks.panos.fragments.full_template_support
 options:
     dns_server_primary:
         description:
@@ -89,7 +90,7 @@ options:
 
 EXAMPLES = """
 - name: set dns and panorama
-  panos_mgtconfig:
+  paloaltonetworks.panos.panos_mgtconfig:
     provider: '{{ provider }}'
     dns_server_primary: "1.1.1.1"
     dns_server_secondary: "1.1.1.2"
@@ -125,6 +126,9 @@ except ImportError:
 
 def main():
     helper = get_connection(
+        template=True,
+        template_stack=True,
+        template_is_optional=True,
         with_classic_provider_spec=True,
         argument_spec=dict(
             hostname=dict(),
@@ -139,7 +143,7 @@ def main():
             verify_update_server=dict(type="bool"),
             ntp_server_primary=dict(),
             ntp_server_secondary=dict(),
-            commit=dict(type="bool", default=False),
+            commit=dict(type="bool"),
         ),
     )
 

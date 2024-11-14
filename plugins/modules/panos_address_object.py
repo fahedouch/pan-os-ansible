@@ -22,9 +22,9 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_address_object
-short_description: Create address objects on PAN-OS devices.
+short_description: Manage address objects on PAN-OS devices.
 description:
-    - Create address objects on PAN-OS devices.
+    - Manage address objects on PAN-OS devices.
 author:
     - Michael Richardson (@mrichardson03)
     - Garfield Lee Freeman (@shinmog)
@@ -39,13 +39,13 @@ extends_documentation_fragment:
     - paloaltonetworks.panos.fragments.transitional_provider
     - paloaltonetworks.panos.fragments.vsys
     - paloaltonetworks.panos.fragments.device_group
-    - paloaltonetworks.panos.fragments.state
+    - paloaltonetworks.panos.fragments.network_resource_module_state
     - paloaltonetworks.panos.fragments.deprecated_commit
+    - paloaltonetworks.panos.fragments.gathered_filter
 options:
     name:
         description:
             - Name of object to create.
-        required: true
         type: str
     value:
         description:
@@ -54,7 +54,7 @@ options:
     address_type:
         description:
             - Type of address object.
-        choices: ['ip-netmask', 'ip-range', 'fqdn']
+        choices: ['ip-netmask', 'ip-range', 'fqdn', 'ip-wildcard']
         type: str
         default: 'ip-netmask'
     description:
@@ -70,7 +70,7 @@ options:
 
 EXAMPLES = """
 - name: Create object 'Test-One'
-  panos_address_object:
+  paloaltonetworks.panos.panos_address_object:
     provider: '{{ provider }}'
     name: 'Test-One'
     value: '1.1.1.1'
@@ -78,7 +78,7 @@ EXAMPLES = """
     tag: ['Prod']
 
 - name: Create object 'Test-Two'
-  panos_address_object:
+  paloaltonetworks.panos.panos_address_object:
     provider: '{{ provider }}'
     name: 'Test-Two'
     address_type: 'ip-range'
@@ -87,7 +87,7 @@ EXAMPLES = """
     tag: ['SI']
 
 - name: Create object 'Test-Three'
-  panos_address_object:
+  paloaltonetworks.panos.panos_address_object:
     provider: '{{ provider }}'
     name: 'Test-Three'
     address_type: 'fqdn'
@@ -95,7 +95,7 @@ EXAMPLES = """
     description: 'Description Three'
 
 - name: Delete object 'Test-Two'
-  panos_address_object:
+  paloaltonetworks.panos.panos_address_object:
     provider: '{{ provider }}'
     name: 'Test-Two'
     state: 'absent'
@@ -110,32 +110,26 @@ from ansible_collections.paloaltonetworks.panos.plugins.module_utils.panos impor
     get_connection,
 )
 
-try:
-    from panos.errors import PanDeviceError
-    from panos.objects import AddressObject
-except ImportError:
-    try:
-        from pandevice.errors import PanDeviceError
-        from pandevice.objects import AddressObject
-    except ImportError:
-        pass
-
 
 def main():
     helper = get_connection(
         vsys=True,
         device_group=True,
         with_classic_provider_spec=True,
-        with_state=True,
-        argument_spec=dict(
+        with_network_resource_module_state=True,
+        with_commit=True,
+        with_gathered_filter=True,
+        sdk_cls=("objects", "AddressObject"),
+        sdk_params=dict(
             name=dict(required=True),
             value=dict(),
             address_type=dict(
-                default="ip-netmask", choices=["ip-netmask", "ip-range", "fqdn"]
+                default="ip-netmask",
+                choices=["ip-netmask", "ip-range", "fqdn", "ip-wildcard"],
+                sdk_param="type",
             ),
             description=dict(),
             tag=dict(type="list", elements="str"),
-            commit=dict(type="bool", default=False),
         ),
     )
 
@@ -145,40 +139,7 @@ def main():
         supports_check_mode=True,
     )
 
-    # Verify libs are present, get parent object.
-    parent = helper.get_pandevice_parent(module)
-
-    # Object params.
-    spec = {
-        "name": module.params["name"],
-        "value": module.params["value"],
-        "type": module.params["address_type"],
-        "description": module.params["description"],
-        "tag": module.params["tag"],
-    }
-
-    # Other info.
-    commit = module.params["commit"]
-
-    # Retrieve current info.
-    try:
-        listing = AddressObject.refreshall(parent, add=False)
-    except PanDeviceError as e:
-        module.fail_json(msg="Failed refresh: {0}".format(e))
-
-    # Build the object based on the user spec.
-    obj = AddressObject(**spec)
-    parent.add(obj)
-
-    # Apply the state.
-    changed, diff = helper.apply_state(obj, listing, module)
-
-    # Commit.
-    if commit and changed:
-        helper.commit(module)
-
-    # Done.
-    module.exit_json(changed=changed, diff=diff)
+    helper.process(module)
 
 
 if __name__ == "__main__":

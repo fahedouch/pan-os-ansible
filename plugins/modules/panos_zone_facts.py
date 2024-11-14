@@ -27,6 +27,10 @@ description:
     - Retrieves information on zones from a firewall or Panorama.
 author: "Garfield Lee Freeman (@shinmog)"
 version_added: '1.0.0'
+deprecated:
+    alternative: Use M(paloaltonetworks.panos.panos_zone) with I(state=gathered).
+    removed_in: '3.0.0'
+    why: Updating module design to network resource modules.
 requirements:
     - pan-python
     - pandevice
@@ -47,14 +51,14 @@ options:
 EXAMPLES = """
 # Get information on a specific zone
 - name: Get zone3 info
-  panos_zone_facts:
+  paloaltonetworks.panos.panos_zone_facts:
     provider: '{{ provider }}'
     name: 'zone3'
   register: ans
 
 # Get the config of all zones
 - name: Get all zones
-  panos_zone_facts:
+  paloaltonetworks.panos.panos_zone_facts:
     provider: '{{ provider }}'
   register: zones
 """
@@ -117,14 +121,25 @@ def main():
         template=True,
         template_stack=True,
         with_classic_provider_spec=True,
+        ansible_to_sdk_param_mapping={
+            "zone": "name",
+            "enable_userid": "enable_user_identification",
+        },
         argument_spec=dict(
             name=dict(),
         ),
     )
+
     module = AnsibleModule(
         argument_spec=helper.argument_spec,
-        supports_check_mode=False,
+        supports_check_mode=True,
         required_one_of=helper.required_one_of,
+    )
+
+    module.deprecate(
+        "Deprecated; use panos_zone with state=gathered instead",
+        version="3.0.0",
+        collection_name="paloaltonetworks.panos",
     )
 
     # Verify imports, build pandevice object tree.
@@ -142,8 +157,7 @@ def main():
         except PanDeviceError as e:
             module.fail_json(msg="Failed refreshall: {0}".format(e))
 
-        zones = helper.to_module_dict(listing, renames)
-        module.exit_json(changed=False, zones=zones)
+        module.exit_json(changed=False, zones=helper.describe(listing))
 
     zone = Zone(name)
     parent.add(zone)
@@ -152,8 +166,7 @@ def main():
     except PanDeviceError as e:
         module.fail_json(msg="Failed refresh: {0}".format(e))
 
-    spec = helper.to_module_dict(zone, renames)
-    module.exit_json(changed=False, spec=spec)
+    module.exit_json(changed=False, spec=helper.describe(zone))
 
 
 if __name__ == "__main__":

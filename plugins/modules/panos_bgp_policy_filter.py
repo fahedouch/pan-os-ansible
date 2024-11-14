@@ -22,7 +22,7 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_bgp_policy_filter
-short_description: Configures a BGP Policy Import/Export Rule
+short_description: Manage a BGP Policy Import/Export Rule
 description:
     - Use BGP to publish and consume routes from disparate networks.
 author:
@@ -140,18 +140,17 @@ options:
     vr_name:
         description:
             - Name of the virtual router; it must already exist and have BGP configured.
-            - See M(panos_virtual_router).
+            - See M(paloaltonetworks.panos.panos_virtual_router).
         type: str
         default: default
 """
 
 EXAMPLES = """
-
 """
 
 RETURN = """
 # Default return values
-panos_obj:
+paloaltonetworks.panos.panos_obj:
     description: a serialized policy filter is returned when state == 'return-object'
     returned: success
     type: str
@@ -212,7 +211,7 @@ def setup_args():
     return dict(
         # TODO(gfreeman) - remove this later on and use the default state.
         state=dict(default="present", choices=["present", "absent", "return-object"]),
-        commit=dict(type="bool", default=False),
+        commit=dict(type="bool"),
         vr_name=dict(default="default"),
         policy_type=dict(
             type="str",
@@ -329,11 +328,12 @@ def main():
         panos_obj = b64encode(pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL))
         module.exit_json(msg="returning serialized object", panos_obj=panos_obj)
 
-    changed, diff = helper.apply_state(obj, listing, module)
-    if changed and module.params["commit"]:
+    resp = helper.apply_state(obj, listing, module)
+    if resp["changed"] and module.params["commit"]:
         helper.commit(module)
 
-    module.exit_json(changed=changed, diff=diff, msg="done")
+    resp["msg"] = "done"
+    module.exit_json(**resp)
 
 
 if __name__ == "__main__":

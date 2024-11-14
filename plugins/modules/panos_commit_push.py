@@ -22,7 +22,7 @@ __metaclass__ = type
 DOCUMENTATION = """
 ---
 module: panos_commit_push
-short_description: Commit Panorama's candidate configuration.
+short_description: Push running configuration to managed devices.
 description:
     - Module that will push the running Panorama configuration to managed devices.
     - The new configuration will become active immediately.
@@ -54,6 +54,11 @@ options:
         description:
             - A description of the commit.
         type: str
+    admins:
+        description:
+            - Push the configuration made by a specific administrator. (PAN-OS 10.2+)
+        type: list
+        elements: str
     include_template:
         description:
             - Include device group reference templates.
@@ -78,27 +83,27 @@ options:
 
 EXAMPLES = """
 - name: push device group configs
-  panos_commit_push:
+  paloaltonetworks.panos.panos_commit_push:
     provider: '{{ credentials }}'
     style: 'device group'
     name: 'Internet Edge Firewalls'
     description: 'Update ECMP routing'
 
 - name: push template configs and force values
-  panos_commit_push:
+  paloaltonetworks.panos.panos_commit_push:
     provider: '{{ credentials }}'
     style: 'template'
     name: 'APAC Regional Template'
-    force_template_values: True
+    force_template_values: true
 
 - name: push log collector group configs
-  panos_commit_push:
+  paloaltonetworks.panos.panos_commit_push:
     provider: '{{ credentials }}'
     style: 'log collector group'
     name: 'LatAm Collector Group'
 
 - name: push to multiple devices
-  panos_commit_push:
+  paloaltonetworks.panos.panos_commit_push:
     provider: '{{ credentials }}'
     style: 'device group'
     name: 'Partner DMZ Firewalls'
@@ -108,15 +113,23 @@ EXAMPLES = """
       - 1001001F0F000
 
 - name: push to multiple device groups
-  panos_commit_push:
+  paloaltonetworks.panos.panos_commit_push:
     provider: '{{ credentials }}'
     style: 'device group'
     name: '{{ item }}'
-    sync: False
+    sync: false
   loop:
     - Production Firewalls
     - Staging Firewalls
     - Development Firewalls
+
+- name: push admin-specific changes to a device group
+  paloaltonetworks.panos.panos_commit_push:
+    provider: "{{ credentials }}"
+    style: 'device group'
+    name: 'EMEA_Device_Group'
+    admins:
+      - 'ansible-admin'
 """
 
 RETURN = """
@@ -140,7 +153,7 @@ except ImportError:
 
 def main():
     helper = get_connection(
-        min_pandevice_version=(1, 0, 0),
+        min_pandevice_version=(1, 8, 0),  # 1.8.0 for per-admin push in PAN-OS 10.2+
         min_panos_version=(8, 0, 0),
         argument_spec=dict(
             style=dict(
@@ -156,6 +169,7 @@ def main():
             ),
             name=dict(type="str"),
             description=dict(type="str"),
+            admins=dict(type="list", elements="str"),
             include_template=dict(type="bool", default=False),
             force_template_values=dict(type="bool", default=False),
             devices=dict(type="list", elements="str"),
@@ -177,6 +191,7 @@ def main():
         style=module.params["style"],
         name=module.params["name"],
         description=module.params["description"],
+        admins=module.params["admins"],
         include_template=module.params["include_template"],
         force_template_values=module.params["force_template_values"],
         devices=module.params["devices"],
@@ -193,7 +208,23 @@ def main():
         commit_results["jobid"] = int(result)
     elif not result["success"]:
         # The commit failed
-        module.fail_json(msg=" | ".join(result["messages"]))
+        fail_message = "Job ID " + result["jobid"] + ": "
+
+        for device in result[
+            "devices"
+        ].items():  # Iterate over all devices that received the commit_push
+            # In the tuples being iterated over here, index 0 is the serial number, index 1 is a dict of commit output messaging
+
+            if not device[1][
+                "success"
+            ]:  # For any devices where the commit_push was not successful...
+                # Add the name of the device and the commit messages
+                fail_message += (
+                    device[1]["name"] + ": " + " | ".join(device[1]["messages"]) + "; "
+                )
+
+        # Send the commit fail messages
+        module.fail_json(msg=fail_message)
     else:
         # The commit succeeded
         commit_results["changed"] = True
